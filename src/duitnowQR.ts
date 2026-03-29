@@ -19,25 +19,24 @@
 const encoder = new TextEncoder();
 
 export function tlv(tag: string, value: string): string {
-  const byteLength = encoder.encode(value).length;
-  const length = byteLength.toString().padStart(2, "0");
-  return `${tag}${length}${value}`;
+  const bytes = encoder.encode(value);
+  const lenStr = bytes.length.toString().padStart(2, "0");
+  return `${tag}${lenStr}${value}`;
 }
 
 // ── CRC16-CCITT ─────────────────────────────────────────────
 
 /**
  * Calculates CRC16-CCITT (polynomial 0x1021, initial 0xFFFF)
- * over the given ASCII string. Returns a 4-character uppercase
+ * over the given byte buffer. Returns a 4-character uppercase
  * hex string (e.g. "A12B").
  *
- * Implemented manually — no external dependencies.
+ * Implemented manually over Uint8Array to be multi-byte safe.
  */
-export function crc16ccitt(input: string): string {
+export function crc16ccitt(payloadBytes: Uint8Array): string {
   let crc = 0xffff;
-
-  for (let i = 0; i < input.length; i++) {
-    crc ^= input.charCodeAt(i) << 8;
+  for (let i = 0; i < payloadBytes.length; i++) {
+    crc ^= payloadBytes[i] << 8;
     for (let j = 0; j < 8; j++) {
       if ((crc & 0x8000) !== 0) {
         crc = ((crc << 1) ^ 0x1021) & 0xffff;
@@ -46,42 +45,14 @@ export function crc16ccitt(input: string): string {
       }
     }
   }
-
   return crc.toString(16).toUpperCase().padStart(4, "0");
 }
-
-// ── DuitNow Constants ───────────────────────────────────────
-
-
-
-/** ISO 4217 numeric code for Malaysian Ringgit */
-const CURRENCY_MYR = "458";
-
-/** ISO 3166-1 alpha-2 for Malaysia */
-const COUNTRY_MY = "MY";
-
-// ── EMVCo Tag IDs ───────────────────────────────────────────
-
-const TAG = {
-  PAYLOAD_FORMAT_INDICATOR: "00",
-  POINT_OF_INITIATION: "01",
-  MERCHANT_ACCOUNT_INFO: "26",
-  MERCHANT_CATEGORY_CODE: "52",
-  TRANSACTION_CURRENCY: "53",
-  TRANSACTION_AMOUNT: "54",
-  COUNTRY_CODE: "58",
-  MERCHANT_NAME: "59",
-  MERCHANT_CITY: "60",
-  CRC: "63",
-} as const;
-
-
 
 // ── Modifier ────────────────────────────────────────────────
 
 /**
  * Parses an EMVCo QR string byte-by-byte, modifies it for a dynamic payment
- * with a new amount, sorts the tags, and recalculates the CRC.
+ * with a new amount, sorts the tags, and recalculates the CRC safely.
  *
  * @throws {Error} if amountInCents is not a positive integer.
  */
@@ -114,30 +85,33 @@ export function modifyEMVCoPayload(
     i += 4 + len;
   }
 
-  // Force Tag 01 to "12" (Dynamic QR)
-  tags.set("01", "12");
+  // Apply required mutations
+  tags.set("01", "12"); // Force Point of Initiation to Dynamic
 
-  // Convert cents to decimal string (e.g. 1550 -> "15.50")
+  // Format amount mathematically
   const ringgit = Math.floor(amountInCents / 100);
   const sen = amountInCents % 100;
   const amountStr = `${ringgit}.${sen.toString().padStart(2, "0")}`;
   tags.set("54", amountStr);
 
-  // Remove the old CRC (Tag 63)
+  // Guarantee required defaults if removed/missing by bank
+  if (!tags.has("53")) tags.set("53", "458"); // MYR
+  if (!tags.has("58")) tags.set("58", "MY");  // Malaysia
+
+  // Delete old CRC
   tags.delete("63");
 
-  // Rebuild the payload by sorting tags as EMVCo expects (00 ascending)
+  // Rebuild the payload sequentially by 00 ASC
   const sortedTags = Array.from(tags.keys()).sort();
-
   let newPayload = "";
   for (const tag of sortedTags) {
     const val = tags.get(tag)!;
     newPayload += tlv(tag, val);
   }
 
-  // Calculate new CRC
-  const crcInput = newPayload + "6304";
-  const crcValue = crc16ccitt(crcInput);
+  // Calcuate byte-safe CRC
+  const crcInputBytes = encoder.encode(newPayload + "6304");
+  const crcValue = crc16ccitt(crcInputBytes);
 
   return newPayload + tlv("63", crcValue);
 }
