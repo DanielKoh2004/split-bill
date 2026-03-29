@@ -32,6 +32,7 @@ type FlowState = "idle" | "loading" | "review" | "success" | "error";
 interface ReviewItem {
   id: string;
   name: string;
+  quantity: number;
   priceInCents: number;
 }
 

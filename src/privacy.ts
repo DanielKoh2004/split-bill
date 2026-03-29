@@ -196,3 +196,16 @@ export async function wipeSession(sessionId: string): Promise<boolean> {
   const deleted = await kv.del(sessionId);
   return deleted > 0;
 }
+
+export async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const base64 = result.split(",")[1];
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("FileReader failed"));
+    reader.readAsDataURL(blob);
+  });
+}

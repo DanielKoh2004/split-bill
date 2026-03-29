@@ -112,3 +112,51 @@ export function modifyEMVCoPayload(
 
   return newPayload + tlv("63", crcValue);
 }
+
+// ── QR Scanner ──────────────────────────────────────────────
+
+/**
+ * Reads an image file and decodes any QR code contained within.
+ */
+export async function parseQRImage(file: File | Blob): Promise<string> {
+  const jsQR = (await import("jsqr")).default;
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("No 2d context"));
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        try {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imgData.data, imgData.width, imgData.height);
+
+          if (code) {
+            resolve(code.data);
+          } else {
+            reject(new Error("No valid QR code found in the image."));
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error("Failed to decode image file."));
+      if (e.target?.result) {
+        img.src = e.target.result as string;
+      } else {
+        reject(new Error("FileReader result empty"));
+      }
+    };
+
+    reader.onerror = () => reject(new Error("Failed to read file."));
+    reader.readAsDataURL(file);
+  });
+}
