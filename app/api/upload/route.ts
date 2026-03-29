@@ -40,19 +40,19 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Get API key from environment
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Server configuration error: missing API key." },
+        { error: "Server configuration error: missing GEMINI_API_KEY." },
         { status: 500 },
       );
     }
 
     // 3. Parse receipt via LLM + Zod validation + math reconciliation gate
     const parsedReceipt = await parseReceiptImage(imageBase64, {
-      provider: "openai",
+      provider: "gemini",
       apiKey,
-      model: "gpt-4o",
+      model: "gemini-2.5-flash",
     });
 
     // 4. Generate ephemeral session ID
@@ -83,11 +83,15 @@ export async function POST(request: NextRequest) {
     if (error instanceof ZodError) {
       return NextResponse.json(
         {
-          error:
-            "Could not parse receipt into a valid format. Please try again.",
-          detail: error.errors.map((e) => e.message).join("; "),
+          error: "Could not parse receipt into a valid format. Please try again.",
+          detail:
+            error && typeof error === "object" && "errors" in error
+              ? (error as any).errors.map((e: any) => e.message).join("; ")
+              : error instanceof Error
+              ? error.message
+              : String(error),
         },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
