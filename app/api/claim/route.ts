@@ -7,43 +7,52 @@ import type { SessionData } from "@/src/privacy";
 // GET  /api/claim — Poll all claims for a session
 // ─────────────────────────────────────────────────────────────
 
-// Lua script: atomically validate availability then set the claim.
-// KEYS[1] = "claims:{sessionId}"
+// Lua script: atomically validate availability then set the claim directly inside the session JSON.
+// KEYS[1] = sessionId
 // ARGV[1] = itemId, ARGV[2] = guestId, ARGV[3] = new qty, ARGV[4] = max qty
 const CLAIM_LUA = `
-local key     = KEYS[1]
-local itemId  = ARGV[1]
+local sessionStr = redis.call('GET', KEYS[1])
+if not sessionStr then return -2 end
+local session = cjson.decode(sessionStr)
+
+local itemId = ARGV[1]
 local guestId = ARGV[2]
-local newQty  = tonumber(ARGV[3])
-local maxQty  = tonumber(ARGV[4])
+local quantity = tonumber(ARGV[3])
+local maxQty = tonumber(ARGV[4])
 
-local all = redis.call('HGETALL', key)
-local othersTotal = 0
+local othersClaimed = 0
+local prefix = 'claim:' .. itemId .. ':'
+local myKey = prefix .. guestId
 
-for i = 1, #all, 2 do
-  local fParts = all[i]
-  local sep    = string.find(fParts, ':', 1, true)
-  if sep then
-    local fItem  = string.sub(fParts, 1, sep - 1)
-    local fGuest = string.sub(fParts, sep + 1)
-    if fItem == itemId and fGuest ~= guestId then
-      othersTotal = othersTotal + tonumber(all[i + 1])
-    end
+for k, v in pairs(session) do
+  if type(k) == 'string' and string.sub(k, 1, string.len(prefix)) == prefix and k ~= myKey then
+    othersClaimed = othersClaimed + tonumber(v)
   end
 end
 
-if othersTotal + newQty > maxQty then
-  return redis.error_reply('CONFLICT: only ' .. tostring(maxQty - othersTotal) .. ' remaining')
+if othersClaimed + quantity > maxQty then
+  return -1
 end
 
-local field = itemId .. ':' .. guestId
-if newQty == 0 then
-  redis.call('HDEL', key, field)
+if quantity == 0 then
+  session[myKey] = nil
 else
-  redis.call('HSET', key, field, newQty)
+  session[myKey] = quantity
 end
-redis.call('EXPIRE', key, 7200)
-return newQty
+
+local newSessionStr = cjson.encode(session)
+redis.call('SET', KEYS[1], newSessionStr, 'EX', 7200)
+
+-- We also maintain the Hash to fulfill the "Keep the GET endpoint exactly the same" requirement seamlessly
+local hashKey = 'claims:' .. KEYS[1]
+if quantity == 0 then
+  redis.call('HDEL', hashKey, itemId .. ':' .. guestId)
+else
+  redis.call('HSET', hashKey, itemId .. ':' .. guestId, quantity)
+  redis.call('EXPIRE', hashKey, 7200)
+end
+
+return 1
 `;
 
 export async function POST(request: NextRequest) {
@@ -85,19 +94,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const claimsKey = `claims:${sessionId}`;
-    try {
-      await kv.eval(
-        CLAIM_LUA,
-        [claimsKey],
-        [itemId, guestId, quantity.toString(), item.quantity.toString()],
+    // Atomic evaluation of the claim against JSON payload
+    const result = await kv.eval(
+      CLAIM_LUA,
+      [sessionId],
+      [itemId, guestId, quantity.toString(), item.quantity.toString()],
+    );
+
+    if (result === -1) {
+      return NextResponse.json(
+        { error: "Conflict: not enough remaining quantity." },
+        { status: 409 },
       );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("CONFLICT")) {
-        return NextResponse.json({ error: msg }, { status: 409 });
-      }
-      throw err;
+    }
+    
+    if (result === -2) {
+      return NextResponse.json(
+        { error: "Session logic expired." },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json({ success: true });
