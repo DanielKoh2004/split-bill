@@ -165,7 +165,8 @@ export interface SessionData {
   receiptJson: Record<string, unknown> | null;
   userClaims: Array<Record<string, unknown>> | null;
   settlementHash: string | null;
-  payeeDuitNowId: string;
+  acquirerId: string;
+  qrId: string;
   [key: string]: unknown;
 }
 

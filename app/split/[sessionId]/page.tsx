@@ -51,5 +51,12 @@ export default async function SplitPage({
   }
 
   // ── Handoff: pass receipt data + sessionId to Client Component ─
-  return <GuestClaimClient receipt={receipt} sessionId={sessionId} payeeDuitNowId={session.payeeDuitNowId as string} />;
+  return (
+    <GuestClaimClient 
+      receipt={receipt} 
+      sessionId={sessionId} 
+      acquirerId={session.acquirerId as string} 
+      qrId={session.qrId as string} 
+    />
+  );
 }

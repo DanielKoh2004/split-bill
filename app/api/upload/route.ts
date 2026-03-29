@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Parse request body
     const body = await request.json();
-    const { imageBase64, payeeDuitNowId } = body as { imageBase64?: string; payeeDuitNowId?: string; };
+    const { imageBase64, acquirerId, qrId } = body as { imageBase64?: string; acquirerId?: string; qrId?: string; };
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
@@ -61,16 +61,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!payeeDuitNowId || typeof payeeDuitNowId !== "string") {
+    if (!acquirerId || typeof acquirerId !== "string" || !qrId || typeof qrId !== "string") {
       return NextResponse.json(
-        { error: "Missing or invalid payeeDuitNowId field." },
-        { status: 400 },
-      );
-    }
-
-    if (payeeDuitNowId.length > 15 || !/^(?:\+60|60)[1-9]\d{7,9}$/.test(payeeDuitNowId)) {
-      return NextResponse.json(
-        { error: "Invalid DuitNow Phone Number format." },
+        { error: "Missing or invalid DuitNow QR credentials." },
         { status: 400 },
       );
     }
@@ -123,7 +116,8 @@ export async function POST(request: NextRequest) {
       receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
       userClaims: [],
       settlementHash: null,
-      payeeDuitNowId,
+      acquirerId,
+      qrId,
     };
     await registerSession(sessionId, sessionData);
 

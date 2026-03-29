@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { Camera, Loader2, CheckCircle2, Copy, AlertCircle } from "lucide-react";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Camera, Loader2, CheckCircle2, Copy, AlertCircle, UploadCloud } from "lucide-react";
 import { sanitizeImage } from "@/src/privacy";
+import jsQR from "jsqr";
 
 // ─────────────────────────────────────────────────────────────
 // constraints.md compliance:
@@ -29,18 +30,127 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+function parseQRImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("Canvas context not supported"));
+      // Draw image to canvas
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Run jsQR
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code && code.data) {
+        resolve(code.data);
+      } else {
+        reject(new Error("No valid QR code found in the image."));
+      }
+    };
+    img.onerror = () => reject(new Error("Failed to load image."));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function parseDuitNowQRString(payload: string): { acquirerId: string; qrId: string } | null {
+  // Simple EMVCo parser
+  let i = 0;
+  let tag26Value = "";
+  while (i < payload.length) {
+    const tag = payload.substring(i, i + 2);
+    const len = parseInt(payload.substring(i + 2, i + 4), 10);
+    const val = payload.substring(i + 4, i + 4 + len);
+    
+    if (tag === "26") {
+      tag26Value = val;
+      break;
+    }
+    i += 4 + len;
+  }
+
+  if (!tag26Value) return null;
+
+  // Parse Subtags inside Tag 26
+  let j = 0;
+  let acquirerId = "";
+  let qrId = "";
+  while (j < tag26Value.length) {
+    const subtag = tag26Value.substring(j, j + 2);
+    const sublen = parseInt(tag26Value.substring(j + 2, j + 4), 10);
+    const subval = tag26Value.substring(j + 4, j + 4 + sublen);
+
+    if (subtag === "01") acquirerId = subval;
+    if (subtag === "02") qrId = subval;
+    
+    j += 4 + sublen;
+  }
+
+  if (!acquirerId || !qrId) return null;
+  return { acquirerId, qrId };
+}
+
 export default function HostUploadPage() {
+  const [mounted, setMounted] = useState(false);
   const [state, setState] = useState<FlowState>("idle");
   const [sessionId, setSessionId] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
-  const [duitNowId, setDuitNowId] = useState<string>("");
+  const [acquirerId, setAcquirerId] = useState<string>("");
+  const [qrId, setQrId] = useState<string>("");
+  const [qrUploaded, setQrUploaded] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const qrInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    const savedAcquirer = localStorage.getItem("duitnow_acquirer_id");
+    const savedQr = localStorage.getItem("duitnow_qr_id");
+    if (savedAcquirer && savedQr) {
+      setAcquirerId(savedAcquirer);
+      setQrId(savedQr);
+      setQrUploaded(true);
+    }
+  }, []);
 
   const shareUrl =
     typeof window !== "undefined" && sessionId
       ? `${window.location.origin}/split/${sessionId}`
       : "";
+
+  // ── Handle QR selection ────────────────────────────────
+  const handleQRChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setErrorMsg("");
+    try {
+      const payload = await parseQRImage(file);
+      const extracted = parseDuitNowQRString(payload);
+      if (!extracted) {
+        throw new Error("Invalid format. Please ensure you upload a valid DuitNow QR.");
+      }
+      setAcquirerId(extracted.acquirerId);
+      setQrId(extracted.qrId);
+      setQrUploaded(true);
+      localStorage.setItem("duitnow_acquirer_id", extracted.acquirerId);
+      localStorage.setItem("duitnow_qr_id", extracted.qrId);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to parse DuitNow QR.");
+      setQrUploaded(false);
+    }
+  };
+
+  const handleChangeAccount = () => {
+    setAcquirerId("");
+    setQrId("");
+    setQrUploaded(false);
+    localStorage.removeItem("duitnow_acquirer_id");
+    localStorage.removeItem("duitnow_qr_id");
+    if (qrInputRef.current) qrInputRef.current.value = "";
+  };
 
   // ── Handle file selection ──────────────────────────────
   const handleFileChange = useCallback(
@@ -59,13 +169,11 @@ export default function HostUploadPage() {
         // Convert sanitized blob to base64
         const base64 = await blobToBase64(sanitizedBlob);
 
-        const cleanId = duitNowId.replace(/[^\d+]/g, '');
-
         // POST to our API route
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, payeeDuitNowId: cleanId }),
+          body: JSON.stringify({ imageBase64: base64, acquirerId, qrId }),
         });
 
         const data = await res.json();
@@ -88,7 +196,7 @@ export default function HostUploadPage() {
         fileInputRef.current.value = "";
       }
     },
-    [duitNowId],
+    [acquirerId, qrId],
   );
 
   // ── Copy share link ────────────────────────────────────
@@ -115,7 +223,15 @@ export default function HostUploadPage() {
   // ═══════════════════════════════════════════════════════
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col items-center justify-center px-5">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col items-center justify-center px-5 relative">
+      {/* Inline Error Notice */}
+      {state === "idle" && errorMsg && (
+        <div className="absolute top-10 left-5 right-5 bg-red-50 text-red-600 text-sm font-semibold p-4 rounded-xl shadow-sm text-center border border-red-100 flex items-center justify-center gap-2">
+          <AlertCircle className="w-5 h-5" />
+          {errorMsg}
+        </div>
+      )}
+
       {/* ── IDLE: Upload State ─────────────────────────── */}
       {state === "idle" && (
         <div className="w-full text-center">
@@ -127,22 +243,57 @@ export default function HostUploadPage() {
             Split the Bill
           </h1>
           <p className="text-sm text-[#64748B] mb-8 leading-relaxed">
-            Snap a photo of your receipt. AI will parse it and
-            generate a share link for your group.
+            Upload your QR and snap your receipt. AI will crunch it natively and safely.
           </p>
 
-          {/* DuitNow ID Input */}
+          {/* DuitNow QR Upload Section */}
           <div className="w-full mb-6">
-            <label className="block text-sm font-semibold text-[#1E293B] mb-2 text-left">
-              Your DuitNow ID (Phone Number)
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. +60123456789"
-              value={duitNowId}
-              onChange={(e) => setDuitNowId(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#10B981] text-center text-lg font-medium"
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-[#1E293B] text-left">
+                Your Personal DuitNow QR
+              </label>
+              {mounted && qrUploaded && (
+                <button
+                  type="button"
+                  onClick={handleChangeAccount}
+                  className="text-xs text-[#64748B] hover:text-[#1E293B] underline underline-offset-2 transition-colors"
+                >
+                  Change Account
+                </button>
+              )}
+            </div>
+
+            {!qrUploaded ? (
+              <>
+                <input
+                  ref={qrInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQRChange}
+                  className="hidden"
+                  id="qr-upload"
+                />
+                <label
+                  htmlFor="qr-upload"
+                  className={`
+                    block w-full py-4 rounded-xl border-2 transition-all duration-200 cursor-pointer flex items-center justify-center gap-3
+                    bg-white border-slate-200 text-slate-500 hover:border-slate-300
+                  `}
+                >
+                  <UploadCloud className="w-5 h-5" />
+                  <span className="font-semibold text-sm">
+                    Upload QR Screenshot
+                  </span>
+                </label>
+              </>
+            ) : (
+              <div className="w-full py-4 rounded-xl border-2 border-[#10B981] bg-emerald-50 text-[#10B981] flex items-center justify-center gap-3 cursor-default">
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="font-semibold text-sm">
+                  ✓ Saved DuitNow Account Active
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Hidden file input */}
@@ -152,27 +303,27 @@ export default function HostUploadPage() {
             accept="image/*"
             capture="environment"
             onChange={handleFileChange}
-            disabled={!duitNowId.trim()}
+            disabled={!qrUploaded}
             className="hidden"
             id="receipt-upload"
           />
 
           {/* Upload target area */}
           <label
-            htmlFor={duitNowId.trim() ? "receipt-upload" : undefined}
+            htmlFor={qrUploaded ? "receipt-upload" : undefined}
             onClick={() => {
-              if (!duitNowId.trim()) setErrorMsg("Please enter your DuitNow ID first.");
+              if (!qrUploaded) setErrorMsg("Please upload your DuitNow QR screenshot first.");
             }}
             className={`
               block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200
-              ${duitNowId.trim()
+              ${qrUploaded
                 ? "border-[#10B981] bg-emerald-50/50 cursor-pointer hover:bg-emerald-50 hover:border-[#059669] active:scale-[0.98]"
                 : "border-slate-300 bg-slate-50 opacity-60 cursor-not-allowed"
               }
             `}
           >
-            <Camera className={`w-10 h-10 mx-auto mb-3 ${duitNowId.trim() ? "text-[#10B981]" : "text-slate-400"}`} />
-            <span className={`text-lg font-bold ${duitNowId.trim() ? "text-[#10B981]" : "text-slate-500"}`}>
+            <Camera className={`w-10 h-10 mx-auto mb-3 ${qrUploaded ? "text-[#10B981]" : "text-slate-400"}`} />
+            <span className={`text-lg font-bold ${qrUploaded ? "text-[#10B981]" : "text-slate-500"}`}>
               Snap Receipt
             </span>
             <span className="block text-xs text-[#64748B] mt-1">
@@ -265,7 +416,7 @@ export default function HostUploadPage() {
           </div>
 
           <h2 className="text-xl font-bold text-[#1E293B] mb-2">
-            Couldn&apos;t parse receipt
+            Couldn't parse receipt
           </h2>
           <p className="text-sm text-[#FC7C78] mb-6">
             {errorMsg}

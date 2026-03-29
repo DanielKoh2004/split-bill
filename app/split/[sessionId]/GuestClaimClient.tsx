@@ -7,12 +7,12 @@ import {
   Plus,
   Check,
   QrCode,
-  Copy,
+  Download,
   X,
   Receipt,
   AlertTriangle,
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
+import { QRCodeCanvas } from "qrcode.react";
 import { calculateSplit } from "@/src/mathEngine";
 import { generateDuitNowPayload } from "@/src/duitnowQR";
 import type { Receipt as ReceiptType } from "@/src/mathEngine";
@@ -68,11 +68,13 @@ function getOrCreateGuestId(sessionId: string): string {
 export default function GuestClaimClient({
   receipt,
   sessionId,
-  payeeDuitNowId,
+  acquirerId,
+  qrId,
 }: {
   receipt: GuestClaimReceipt;
   sessionId: string;
-  payeeDuitNowId: string;
+  acquirerId: string;
+  qrId: string;
 }) {
   const items: ReceiptItemDisplay[] = receipt.items;
 
@@ -96,7 +98,6 @@ export default function GuestClaimClient({
   const [claims, setClaims] = useState<Record<string, number>>({});
   const [othersTotals, setOthersTotals] = useState<Record<string, number>>({});
   const [showModal, setShowModal] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
 
   const pendingSyncsRef = useRef(0);
@@ -280,8 +281,8 @@ export default function GuestClaimClient({
   // ── QR Payload ────────────────────────────────────────
   const qrPayload = useMemo(() => {
     if (userTotal <= 0) return "";
-    return generateDuitNowPayload(payeeDuitNowId, userTotal);
-  }, [userTotal, payeeDuitNowId]);
+    return generateDuitNowPayload(qrId, userTotal, { proxyType: acquirerId });
+  }, [userTotal, qrId, acquirerId]);
 
   // ── Proportional breakdown (integer math, no floats) ──
   const breakdown = useMemo(() => {
@@ -301,15 +302,23 @@ export default function GuestClaimClient({
 
   const hasItems = Object.keys(claims).length > 0;
 
-  // ── Copy handler ──────────────────────────────────────
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(payeeDuitNowId);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard not available */
-    }
+  // ── Download QR Handler ───────────────────────────────
+  const downloadQR = () => {
+    const canvas = document.getElementById("duitnow-qr") as HTMLCanvasElement;
+    if (!canvas) return;
+
+    // Convert canvas to image data URL
+    const pngUrl = canvas
+      .toDataURL("image/png")
+      .replace("image/png", "image/octet-stream");
+    
+    // Trigger download
+    const downloadLink = document.createElement("a");
+    downloadLink.href = pngUrl;
+    downloadLink.download = "split-bill-payment.png";
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
   };
 
   // ═══════════════════════════════════════════════════════
@@ -555,7 +564,8 @@ export default function GuestClaimClient({
 
             <div className="flex justify-center mb-6">
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                <QRCodeSVG
+                <QRCodeCanvas
+                  id="duitnow-qr"
                   value={qrPayload || "placeholder"}
                   size={250}
                   level="M"
@@ -599,12 +609,18 @@ export default function GuestClaimClient({
               </div>
             </div>
 
+            <div className="mt-4 mb-3 text-center">
+              <p className="text-xs text-[#64748B]">
+                Open your banking app, tap Scan, and select this image from your gallery.
+              </p>
+            </div>
+
             <button
-              onClick={handleCopy}
+              onClick={downloadQR}
               className="w-full py-3.5 rounded-2xl bg-[#1E293B] text-white font-semibold flex items-center justify-center gap-2 transition-all duration-200 active:bg-slate-800"
             >
-              <Copy className="w-4 h-4" />
-              {copied ? "Copied!" : "Copy DuitNow ID"}
+              <Download className="w-4 h-4" />
+              Save QR to Gallery
             </button>
           </div>
         </div>
