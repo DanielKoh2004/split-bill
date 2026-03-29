@@ -77,66 +77,67 @@ const TAG = {
 
 
 
-// ── Payload Generator ───────────────────────────────────────
-
-export interface DuitNowPayloadOptions {
-  /** Merchant Category Code (4-digit ISO 18245). Default: "0000" */
-  merchantCategoryCode?: string;
-  /** Merchant name for the QR payload. Default: "SPLITBILL USER" */
-  merchantName?: string;
-  /** Merchant city. Default: "KUALA LUMPUR" */
-  merchantCity?: string;
-}
+// ── Modifier ────────────────────────────────────────────────
 
 /**
- * Generates a complete EMVCo-compliant DuitNow dynamic QR payload string.
- *
- * The amountInCents is converted to a decimal string (e.g. 1550 → "15.50")
- * **only** at the moment it's injected into the payload.
+ * Parses an EMVCo QR string byte-by-byte, modifies it for a dynamic payment
+ * with a new amount, sorts the tags, and recalculates the CRC.
  *
  * @throws {Error} if amountInCents is not a positive integer.
  */
-export function generateDuitNowPayload(
-  merchantAccountInfo: string,
+export function modifyEMVCoPayload(
+  originalPayload: string,
   amountInCents: number,
-  options?: Partial<DuitNowPayloadOptions>,
 ): string {
-  // ── Validation ────────────────────────────────────────────
   if (!Number.isInteger(amountInCents) || amountInCents <= 0) {
     throw new Error(
       `amountInCents must be a positive integer, got: ${amountInCents}`,
     );
   }
-  if (!merchantAccountInfo || merchantAccountInfo.trim().length === 0) {
-    throw new Error("merchantAccountInfo must be a non-empty string");
+
+  const decoder = new TextDecoder();
+  const bytes = encoder.encode(originalPayload);
+  const tags = new Map<string, string>();
+
+  let i = 0;
+  while (i < bytes.length) {
+    if (i + 4 > bytes.length) break;
+    const tag = decoder.decode(bytes.slice(i, i + 2));
+    const lenStr = decoder.decode(bytes.slice(i + 2, i + 4));
+    const len = parseInt(lenStr, 10);
+    if (isNaN(len)) break;
+
+    const valueBytes = bytes.slice(i + 4, i + 4 + len);
+    const value = decoder.decode(valueBytes);
+
+    tags.set(tag, value);
+    i += 4 + len;
   }
 
-  const merchantCategoryCode = options?.merchantCategoryCode ?? "0000";
-  const merchantName = options?.merchantName ?? "SPLITBILL USER";
-  const merchantCity = options?.merchantCity ?? "KUALA LUMPUR";
+  // Force Tag 01 to "12" (Dynamic QR)
+  tags.set("01", "12");
 
-  // ── Convert cents to decimal string ───────────────────────
-  // 1550 → "15.50", 100 → "1.00", 5 → "0.05"
+  // Convert cents to decimal string (e.g. 1550 -> "15.50")
   const ringgit = Math.floor(amountInCents / 100);
   const sen = amountInCents % 100;
   const amountStr = `${ringgit}.${sen.toString().padStart(2, "0")}`;
+  tags.set("54", amountStr);
 
-  // ── Assemble payload (without CRC) ────────────────────────
-  const payloadWithoutCrc =
-    tlv(TAG.PAYLOAD_FORMAT_INDICATOR, "01") +         // Tag 00
-    tlv(TAG.POINT_OF_INITIATION, "12") +              // Tag 01: Dynamic QR (amount locked)
-    tlv(TAG.MERCHANT_ACCOUNT_INFO, merchantAccountInfo) +      // Tag 26
-    tlv(TAG.MERCHANT_CATEGORY_CODE, merchantCategoryCode) + // Tag 52
-    tlv(TAG.TRANSACTION_CURRENCY, CURRENCY_MYR) +     // Tag 53
-    tlv(TAG.TRANSACTION_AMOUNT, amountStr) +           // Tag 54
-    tlv(TAG.COUNTRY_CODE, COUNTRY_MY) +               // Tag 58
-    tlv(TAG.MERCHANT_NAME, merchantName) +             // Tag 59
-    tlv(TAG.MERCHANT_CITY, merchantCity);              // Tag 60
+  // Remove the old CRC (Tag 63)
+  tags.delete("63");
 
-  // ── Append CRC placeholder then calculate ─────────────────
-  // The CRC is computed over the entire string INCLUDING "6304"
-  const crcInput = payloadWithoutCrc + TAG.CRC + "04";
+  // Rebuild the payload by sorting tags as EMVCo expects (00 ascending)
+  const sortedTags = Array.from(tags.keys()).sort();
+
+  let newPayload = "";
+  for (const tag of sortedTags) {
+    const val = tags.get(tag)!;
+    newPayload += tlv(tag, val);
+  }
+
+  // Calculate new CRC
+  const crcInput = newPayload + "6304";
   const crcValue = crc16ccitt(crcInput);
 
-  return payloadWithoutCrc + tlv(TAG.CRC, crcValue);
+  return newPayload + tlv("63", crcValue);
 }

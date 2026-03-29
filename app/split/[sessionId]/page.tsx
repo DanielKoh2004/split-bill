@@ -55,7 +55,7 @@ export default async function SplitPage({
     <GuestClaimClient 
       receipt={receipt} 
       sessionId={sessionId} 
-      merchantAccountInfo={session.merchantAccountInfo as string} 
+      originalQrString={session.originalQrString as string} 
     />
   );
 }

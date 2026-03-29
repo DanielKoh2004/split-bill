@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { QRCodeCanvas } from "qrcode.react";
 import { calculateSplit } from "@/src/mathEngine";
-import { generateDuitNowPayload } from "@/src/duitnowQR";
+import { modifyEMVCoPayload } from "@/src/duitnowQR";
 import type { Receipt as ReceiptType } from "@/src/mathEngine";
 
 // ═══════════════════════════════════════════════════════════
@@ -68,11 +68,11 @@ function getOrCreateGuestId(sessionId: string): string {
 export default function GuestClaimClient({
   receipt,
   sessionId,
-  merchantAccountInfo,
+  originalQrString,
 }: {
   receipt: GuestClaimReceipt;
   sessionId: string;
-  merchantAccountInfo: string;
+  originalQrString: string;
 }) {
   const items: ReceiptItemDisplay[] = receipt.items;
 
@@ -279,8 +279,8 @@ export default function GuestClaimClient({
   // ── QR Payload ────────────────────────────────────────
   const qrPayload = useMemo(() => {
     if (userTotal <= 0) return "";
-    return generateDuitNowPayload(merchantAccountInfo, userTotal);
-  }, [userTotal, merchantAccountInfo]);
+    return modifyEMVCoPayload(originalQrString, userTotal);
+  }, [userTotal, originalQrString]);
 
   // ── Proportional breakdown (integer math, no floats) ──
   const breakdown = useMemo(() => {
