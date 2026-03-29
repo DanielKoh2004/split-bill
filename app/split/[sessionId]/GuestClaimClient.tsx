@@ -16,6 +16,8 @@ import {
   CreditCard,
   Users,
   Image as ImageIcon,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import Link from "next/link";
 import { QRCodeCanvas } from "qrcode.react";
@@ -138,6 +140,7 @@ export default function GuestClaimClient({
   const [mySplits, setMySplits] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [copiedAmount, setCopiedAmount] = useState(false);
   const [copiedProof, setCopiedProof] = useState(false);
@@ -426,9 +429,27 @@ export default function GuestClaimClient({
   const hasItems = Object.keys(claims).length > 0 || mySplits.size > 0;
 
   // ── Handlers ──────────────────────────────────────────
-  const downloadQR = () => {
+  const downloadQR = async () => {
     const canvas = document.getElementById("duitnow-qr") as HTMLCanvasElement;
     if (!canvas) return;
+
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+      if (!blob) throw new Error("Canvas toBlob failed");
+
+      const file = new File([blob], "split-bill-payment.png", { type: "image/png" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "DuitNow QR",
+          text: "Scan to pay for my share."
+        });
+        return;
+      }
+    } catch (e) {
+      console.warn("Web Share API failed, falling back to basic download", e);
+    }
+
     const pngUrl = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
     const link = document.createElement("a");
     link.href = pngUrl;
@@ -625,16 +646,23 @@ export default function GuestClaimClient({
           {t.selectYourItems}
         </span>
 
-        {Array.from(groupItemsBySection(items, t.general)).map(([sectionLabel, sectionItems]) => (
-          <div key={sectionLabel} className="space-y-2">
-            <div className="flex items-center gap-2 pt-3 pb-1">
-              <span className="text-xs font-bold text-primary-themed uppercase tracking-wider bg-elevated-themed px-3 py-1.5 rounded-lg">
-                🍽 {sectionLabel}
-              </span>
-              <div className="flex-1 border-t border-themed" />
-            </div>
+        {Array.from(groupItemsBySection(items, t.general)).map(([sectionLabel, sectionItems]) => {
+          const isCollapsed = collapsedSections[sectionLabel];
 
-            {sectionItems.map((item) => {
+          return (
+            <div key={sectionLabel} className="space-y-2">
+              <button 
+                onClick={() => setCollapsedSections(prev => ({ ...prev, [sectionLabel]: !prev[sectionLabel] }))}
+                className="w-full flex items-center gap-2 pt-3 pb-1 transition-opacity hover:opacity-80 active:opacity-60 text-left"
+              >
+                <span className="text-xs font-bold text-primary-themed uppercase tracking-wider bg-elevated-themed px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+                  🍽 {sectionLabel}
+                  {isCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                </span>
+                <div className="flex-1 border-t border-themed transition-opacity" />
+              </button>
+
+              {!isCollapsed && sectionItems.map((item) => {
               const claimed = claims[item.id] ?? 0;
               const othersQty = othersTotals[item.id] ?? 0;
               const remaining = item.quantity - claimed - othersQty;
@@ -767,7 +795,7 @@ export default function GuestClaimClient({
               );
             })}
           </div>
-        ))}
+        )})}
       </div>
 
       {/* Sticky Footer */}

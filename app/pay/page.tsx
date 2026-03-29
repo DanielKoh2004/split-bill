@@ -158,6 +158,9 @@ export default function GlobalPayPage() {
   }, [bills]);
 
   const markAsPaid = (originalQrString: string, sessionIds: string[]) => {
+      const confirmed = window.confirm("Are you sure? This will remove the bill from your device permanently.");
+      if (!confirmed) return;
+
       const remaining = bills.filter(b => !sessionIds.includes(b.sessionId));
       setBills(remaining);
       localStorage.setItem("pending_bills", JSON.stringify(remaining));
