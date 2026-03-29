@@ -74,10 +74,10 @@ function formatRM(cents: number): string {
 function getOrCreateGuestId(sessionId: string): string {
   const storageKey = `splitbill-guest-${sessionId}`;
   if (typeof window !== "undefined") {
-    const existing = sessionStorage.getItem(storageKey);
+    const existing = localStorage.getItem(storageKey);
     if (existing) return existing;
     const id = crypto.randomUUID();
-    sessionStorage.setItem(storageKey, id);
+    localStorage.setItem(storageKey, id);
     return id;
   }
   return crypto.randomUUID();
@@ -85,12 +85,12 @@ function getOrCreateGuestId(sessionId: string): string {
 
 function getSavedGuestName(sessionId: string): string {
   if (typeof window === "undefined") return "";
-  return sessionStorage.getItem(`splitbill-name-${sessionId}`) || "";
+  return localStorage.getItem(`splitbill-name-${sessionId}`) || "";
 }
 
 function saveGuestName(sessionId: string, name: string) {
   if (typeof window !== "undefined") {
-    sessionStorage.setItem(`splitbill-name-${sessionId}`, name);
+    localStorage.setItem(`splitbill-name-${sessionId}`, name);
   }
 }
 

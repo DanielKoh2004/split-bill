@@ -43,7 +43,7 @@ export default function GlobalPayPage() {
       const updatedBills = await Promise.all(
         bills.map(async (b) => {
           try {
-            const guestId = localStorage.getItem(`guestId_${b.sessionId}`);
+            const guestId = localStorage.getItem(`splitbill-guest-${b.sessionId}`);
             if (!guestId) return b;
 
             const res = await fetch(`/api/session/status?sessionId=${b.sessionId}`, {
