@@ -5,6 +5,7 @@ import { ChevronLeft, Download, CheckCircle2, Copy, Info } from "lucide-react";
 import Link from "next/link";
 import { QRCodeCanvas } from "qrcode.react";
 import { modifyEMVCoPayload } from "@/src/duitnowQR";
+import { calculateSplit, FractionalClaim, UserClaim } from "@/src/mathEngine";
 import { useAppContext } from "@/src/ThemeContext";
 import ToggleBar from "@/app/components/ToggleBar";
 
@@ -35,8 +36,100 @@ export default function GlobalPayPage() {
 
   useEffect(() => {
     if (!mounted || bills.length === 0) return;
-    Promise.all(bills.map(b => fetch(`/api/claim?sessionId=${b.sessionId}`)))
-      .catch(console.error);
+
+    let isSubscribed = true;
+
+    async function fetchLiveTotals() {
+      const updatedBills = await Promise.all(
+        bills.map(async (b) => {
+          try {
+            const guestId = localStorage.getItem(`guestId_${b.sessionId}`);
+            if (!guestId) return b;
+
+            const res = await fetch(`/api/session/status?sessionId=${b.sessionId}`, {
+              headers: { "x-qr-proof": b.originalQrString },
+            });
+            if (!res.ok) {
+              if (res.status === 404) {
+                return { ...b, isDead: true };
+              }
+              return b;
+            }
+
+            const data = await res.json();
+            const rawClaims = data.claims || {};
+            const allClaims: (UserClaim | FractionalClaim)[] = [];
+            const itemSplits = new Map<string, Set<string>>();
+
+            for (const [key, val] of Object.entries(rawClaims)) {
+              if (key.startsWith("name:")) continue;
+              if (key.startsWith("split:")) {
+                const [, itemId, uid] = key.split(":");
+                if (!itemSplits.has(itemId)) itemSplits.set(itemId, new Set());
+                itemSplits.get(itemId)!.add(uid);
+              } else {
+                const [itemId, uid] = key.split(":");
+                const qty = Number(val);
+                for (let i = 0; i < qty; i++) {
+                  allClaims.push({ userId: uid, itemId });
+                }
+              }
+            }
+
+            for (const [itemId, users] of Array.from(itemSplits.entries())) {
+              const totalSharers = users.size;
+              for (const uid of Array.from(users)) {
+                allClaims.push({
+                  userId: uid,
+                  itemId,
+                  shares: 1,
+                  totalSharers,
+                } as FractionalClaim);
+              }
+            }
+
+            if (data.receipt && data.receipt.items) {
+              for (const item of data.receipt.items) {
+                const isSplit = itemSplits.has(item.id);
+                // exclusive claims count
+                const claimedQty = allClaims.filter(c => c.itemId === item.id && !('totalSharers' in c)).length;
+                if (!isSplit && claimedQty < item.quantity) {
+                  for (let i = 0; i < item.quantity - claimedQty; i++) {
+                    allClaims.push({ userId: "unclaimed", itemId: item.id });
+                  }
+                }
+              }
+            }
+
+            const totals = calculateSplit(data.receipt, allClaims);
+            const userTotal = totals[guestId] || 0;
+            return { ...b, userTotal, isDead: false };
+          } catch (e) {
+            return b;
+          }
+        })
+      );
+
+      const aliveBills = updatedBills.filter(ub => !(ub as any).isDead);
+
+      // check if anything actually changed to prevent infinite loops
+      const hasChanges = 
+        aliveBills.length !== bills.length || 
+        aliveBills.some((ub, i) => ub.userTotal !== bills[i].userTotal);
+
+      if (isSubscribed && hasChanges) {
+        setBills(aliveBills);
+        localStorage.setItem("pending_bills", JSON.stringify(aliveBills));
+      }
+    }
+
+    fetchLiveTotals();
+    const timer = setInterval(fetchLiveTotals, 5000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(timer);
+    };
   }, [mounted, bills]);
 
   // Grouping Engine

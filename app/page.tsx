@@ -163,8 +163,8 @@ export default function HostUploadPage() {
     setErrorMsg("");
     try {
       const payload = await parseQRImage(file);
-      if (!payload || payload.length < 50) {
-        throw new Error("Invalid format. Please ensure you upload a valid DuitNow QR.");
+      if (!payload || payload.length < 50 || !payload.startsWith("000201")) {
+        throw new Error("Invalid format. Please ensure you upload a valid DuitNow QR (must start with 000201).");
       }
       setOriginalQrString(payload);
       setQrUploaded(true);
@@ -247,12 +247,17 @@ export default function HostUploadPage() {
     );
 
     const newSubtotal = updatedItems.reduce((sum, i) => sum + i.priceInCents, 0);
-    const newGrandTotal = newSubtotal + reviewReceipt.taxInCents + reviewReceipt.serviceChargeInCents;
+    const ratio = newSubtotal / (reviewReceipt.subtotalInCents || 1);
+    const newTax = Math.floor(reviewReceipt.taxInCents * ratio);
+    const newService = Math.floor(reviewReceipt.serviceChargeInCents * ratio);
+    const newGrandTotal = newSubtotal + newTax + newService;
 
     setReviewReceipt({
       ...reviewReceipt,
       items: updatedItems,
       subtotalInCents: newSubtotal,
+      taxInCents: newTax,
+      serviceChargeInCents: newService,
       grandTotalInCents: newGrandTotal,
     });
 
@@ -273,14 +278,29 @@ export default function HostUploadPage() {
     if (updatedItems.length === 0) return;
 
     const newSubtotal = updatedItems.reduce((sum, i) => sum + i.priceInCents, 0);
-    const newGrandTotal = newSubtotal + reviewReceipt.taxInCents + reviewReceipt.serviceChargeInCents;
+    const ratio = newSubtotal / (reviewReceipt.subtotalInCents || 1);
+    const newTax = Math.floor(reviewReceipt.taxInCents * ratio);
+    const newService = Math.floor(reviewReceipt.serviceChargeInCents * ratio);
+    const newGrandTotal = newSubtotal + newTax + newService;
 
     setReviewReceipt({
       ...reviewReceipt,
       items: updatedItems,
       subtotalInCents: newSubtotal,
+      taxInCents: newTax,
+      serviceChargeInCents: newService,
       grandTotalInCents: newGrandTotal,
     });
+  };
+
+  const handleUpdateTotals = (field: "taxInCents" | "serviceChargeInCents", value: string) => {
+    if (!reviewReceipt) return;
+    const newCents = Math.round(parseFloat(value) * 100);
+    if (isNaN(newCents)) return;
+
+    const newReceipt = { ...reviewReceipt, [field]: newCents };
+    newReceipt.grandTotalInCents = newReceipt.subtotalInCents + newReceipt.taxInCents + newReceipt.serviceChargeInCents;
+    setReviewReceipt(newReceipt);
   };
 
   // ── Review: Finalize → Phase 2 ────────────────────────
@@ -943,17 +963,31 @@ export default function HostUploadPage() {
                   {formatRM(reviewReceipt.subtotalInCents)}
                 </span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-secondary-themed">{t.sstTax}</span>
-                <span className="text-primary-themed font-medium font-mono">
-                  {formatRM(reviewReceipt.taxInCents)}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-secondary-themed font-medium">RM</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={(reviewReceipt.taxInCents / 100).toFixed(2)}
+                    onChange={(e) => handleUpdateTotals("taxInCents", e.target.value)}
+                    className="w-20 px-2 py-1 rounded-md border border-themed bg-input-themed text-primary-themed font-medium font-mono text-right focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                  />
+                </div>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-secondary-themed">{t.serviceCharge}</span>
-                <span className="text-primary-themed font-medium font-mono">
-                  {formatRM(reviewReceipt.serviceChargeInCents)}
-                </span>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-secondary-themed font-medium">RM</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={(reviewReceipt.serviceChargeInCents / 100).toFixed(2)}
+                    onChange={(e) => handleUpdateTotals("serviceChargeInCents", e.target.value)}
+                    className="w-20 px-2 py-1 rounded-md border border-themed bg-input-themed text-primary-themed font-medium font-mono text-right focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                  />
+                </div>
               </div>
               <div className="border-t border-themed pt-2 mt-2 flex justify-between">
                 <span className="font-bold text-primary-themed">{t.grandTotal}</span>

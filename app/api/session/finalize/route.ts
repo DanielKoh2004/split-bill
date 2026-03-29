@@ -95,6 +95,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Server-Side Math Verification
+    let calculatedSubtotal = 0;
+    for (const item of items) {
+      if (typeof item.priceInCents !== "number" || !Number.isInteger(item.priceInCents)) {
+        return NextResponse.json(
+          { error: "Invalid item priceInCents." },
+          { status: 400 },
+        );
+      }
+      calculatedSubtotal += item.priceInCents;
+    }
+
+    const tTax = (receipt as any).taxInCents || 0;
+    const tService = (receipt as any).serviceChargeInCents || 0;
+    const expectedGrandTotal = calculatedSubtotal + tTax + tService;
+
+    if (
+      (receipt as any).subtotalInCents !== calculatedSubtotal ||
+      grandTotal !== expectedGrandTotal
+    ) {
+      return NextResponse.json(
+        { error: "Math mismatch: The server calculations do not match the client's totals." },
+        { status: 400 },
+      );
+    }
+
     // ── Merge or Create ──────────────────────────────────
     let sessionId: string;
     let sessionData: SessionData;
@@ -114,6 +140,7 @@ export async function POST(request: NextRequest) {
 
       const combinedReceipt = {
         ...existingReceipt,
+        merchantName: "Combined Trip Settlement",
         subtotalInCents: existingReceipt.subtotalInCents + newReceipt.subtotalInCents,
         taxInCents: existingReceipt.taxInCents + newReceipt.taxInCents,
         serviceChargeInCents: existingReceipt.serviceChargeInCents + newReceipt.serviceChargeInCents,
