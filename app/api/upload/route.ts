@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     // 1. Parse request body
     const body = await request.json();
-    const { imageBase64, acquirerId, qrId } = body as { imageBase64?: string; acquirerId?: string; qrId?: string; };
+    const { imageBase64, merchantAccountInfo } = body as { imageBase64?: string; merchantAccountInfo?: string; };
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
@@ -61,9 +61,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!acquirerId || typeof acquirerId !== "string" || !qrId || typeof qrId !== "string") {
+    if (!merchantAccountInfo || typeof merchantAccountInfo !== "string") {
       return NextResponse.json(
-        { error: "Missing or invalid DuitNow QR credentials." },
+        { error: "Missing or invalid DuitNow QR merchant info." },
         { status: 400 },
       );
     }
@@ -116,8 +116,7 @@ export async function POST(request: NextRequest) {
       receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
       userClaims: [],
       settlementHash: null,
-      acquirerId,
-      qrId,
+      merchantAccountInfo,
     };
     await registerSession(sessionId, sessionData);
 

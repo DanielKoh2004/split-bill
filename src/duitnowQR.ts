@@ -52,8 +52,7 @@ export function crc16ccitt(input: string): string {
 
 // ── DuitNow Constants ───────────────────────────────────────
 
-/** DuitNow AID / Globally Unique Identifier (PayNet) */
-const DUITNOW_GUID = "A0000006150001";
+
 
 /** ISO 4217 numeric code for Malaysian Ringgit */
 const CURRENCY_MYR = "458";
@@ -76,22 +75,11 @@ const TAG = {
   CRC: "63",
 } as const;
 
-/** Sub-tags inside Tag 26 (Merchant Account Information) */
-const SUBTAG = {
-  GUID: "00",
-  PROXY_TYPE: "01",
-  PROXY_VALUE: "02",
-} as const;
+
 
 // ── Payload Generator ───────────────────────────────────────
 
 export interface DuitNowPayloadOptions {
-  /** DuitNow proxy ID (phone number, NRIC, etc.) */
-  duitNowId: string;
-  /** Amount in sen/cents (integer). e.g. 1550 for RM 15.50 */
-  amountInCents: number;
-  /** Proxy type identifier. Default: "01" (mobile) */
-  proxyType?: string;
   /** Merchant Category Code (4-digit ISO 18245). Default: "0000" */
   merchantCategoryCode?: string;
   /** Merchant name for the QR payload. Default: "SPLITBILL USER" */
@@ -109,9 +97,9 @@ export interface DuitNowPayloadOptions {
  * @throws {Error} if amountInCents is not a positive integer.
  */
 export function generateDuitNowPayload(
-  duitNowId: string,
+  merchantAccountInfo: string,
   amountInCents: number,
-  options?: Partial<Omit<DuitNowPayloadOptions, "duitNowId" | "amountInCents">>,
+  options?: Partial<DuitNowPayloadOptions>,
 ): string {
   // ── Validation ────────────────────────────────────────────
   if (!Number.isInteger(amountInCents) || amountInCents <= 0) {
@@ -119,11 +107,10 @@ export function generateDuitNowPayload(
       `amountInCents must be a positive integer, got: ${amountInCents}`,
     );
   }
-  if (!duitNowId || duitNowId.trim().length === 0) {
-    throw new Error("duitNowId must be a non-empty string");
+  if (!merchantAccountInfo || merchantAccountInfo.trim().length === 0) {
+    throw new Error("merchantAccountInfo must be a non-empty string");
   }
 
-  const proxyType = options?.proxyType ?? "01";
   const merchantCategoryCode = options?.merchantCategoryCode ?? "0000";
   const merchantName = options?.merchantName ?? "SPLITBILL USER";
   const merchantCity = options?.merchantCity ?? "KUALA LUMPUR";
@@ -134,17 +121,11 @@ export function generateDuitNowPayload(
   const sen = amountInCents % 100;
   const amountStr = `${ringgit}.${sen.toString().padStart(2, "0")}`;
 
-  // ── Build Tag 26: Merchant Account Information ────────────
-  const tag26Inner =
-    tlv(SUBTAG.GUID, DUITNOW_GUID) +
-    tlv(SUBTAG.PROXY_TYPE, proxyType) +
-    tlv(SUBTAG.PROXY_VALUE, duitNowId);
-
   // ── Assemble payload (without CRC) ────────────────────────
   const payloadWithoutCrc =
     tlv(TAG.PAYLOAD_FORMAT_INDICATOR, "01") +         // Tag 00
     tlv(TAG.POINT_OF_INITIATION, "12") +              // Tag 01: Dynamic QR (amount locked)
-    tlv(TAG.MERCHANT_ACCOUNT_INFO, tag26Inner) +      // Tag 26
+    tlv(TAG.MERCHANT_ACCOUNT_INFO, merchantAccountInfo) +      // Tag 26
     tlv(TAG.MERCHANT_CATEGORY_CODE, merchantCategoryCode) + // Tag 52
     tlv(TAG.TRANSACTION_CURRENCY, CURRENCY_MYR) +     // Tag 53
     tlv(TAG.TRANSACTION_AMOUNT, amountStr) +           // Tag 54

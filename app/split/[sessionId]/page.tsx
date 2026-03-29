@@ -55,8 +55,7 @@ export default async function SplitPage({
     <GuestClaimClient 
       receipt={receipt} 
       sessionId={sessionId} 
-      acquirerId={session.acquirerId as string} 
-      qrId={session.qrId as string} 
+      merchantAccountInfo={session.merchantAccountInfo as string} 
     />
   );
 }

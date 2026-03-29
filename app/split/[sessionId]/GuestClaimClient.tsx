@@ -68,13 +68,11 @@ function getOrCreateGuestId(sessionId: string): string {
 export default function GuestClaimClient({
   receipt,
   sessionId,
-  acquirerId,
-  qrId,
+  merchantAccountInfo,
 }: {
   receipt: GuestClaimReceipt;
   sessionId: string;
-  acquirerId: string;
-  qrId: string;
+  merchantAccountInfo: string;
 }) {
   const items: ReceiptItemDisplay[] = receipt.items;
 
@@ -281,8 +279,8 @@ export default function GuestClaimClient({
   // ── QR Payload ────────────────────────────────────────
   const qrPayload = useMemo(() => {
     if (userTotal <= 0) return "";
-    return generateDuitNowPayload(qrId, userTotal, { proxyType: acquirerId });
-  }, [userTotal, qrId, acquirerId]);
+    return generateDuitNowPayload(merchantAccountInfo, userTotal);
+  }, [userTotal, merchantAccountInfo]);
 
   // ── Proportional breakdown (integer math, no floats) ──
   const breakdown = useMemo(() => {

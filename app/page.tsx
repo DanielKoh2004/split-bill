@@ -55,7 +55,7 @@ function parseQRImage(file: File): Promise<string> {
   });
 }
 
-function parseDuitNowQRString(payload: string): { acquirerId: string; qrId: string } | null {
+function parseDuitNowQRString(payload: string): string | null {
   // Simple EMVCo parser
   let i = 0;
   let tag26Value = "";
@@ -73,23 +73,7 @@ function parseDuitNowQRString(payload: string): { acquirerId: string; qrId: stri
 
   if (!tag26Value) return null;
 
-  // Parse Subtags inside Tag 26
-  let j = 0;
-  let acquirerId = "";
-  let qrId = "";
-  while (j < tag26Value.length) {
-    const subtag = tag26Value.substring(j, j + 2);
-    const sublen = parseInt(tag26Value.substring(j + 2, j + 4), 10);
-    const subval = tag26Value.substring(j + 4, j + 4 + sublen);
-
-    if (subtag === "01") acquirerId = subval;
-    if (subtag === "02") qrId = subval;
-    
-    j += 4 + sublen;
-  }
-
-  if (!acquirerId || !qrId) return null;
-  return { acquirerId, qrId };
+  return tag26Value;
 }
 
 export default function HostUploadPage() {
@@ -97,8 +81,7 @@ export default function HostUploadPage() {
   const [state, setState] = useState<FlowState>("idle");
   const [sessionId, setSessionId] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
-  const [acquirerId, setAcquirerId] = useState<string>("");
-  const [qrId, setQrId] = useState<string>("");
+  const [merchantAccountInfo, setMerchantAccountInfo] = useState<string>("");
   const [qrUploaded, setQrUploaded] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -106,11 +89,9 @@ export default function HostUploadPage() {
 
   useEffect(() => {
     setMounted(true);
-    const savedAcquirer = localStorage.getItem("duitnow_acquirer_id");
-    const savedQr = localStorage.getItem("duitnow_qr_id");
-    if (savedAcquirer && savedQr) {
-      setAcquirerId(savedAcquirer);
-      setQrId(savedQr);
+    const savedInfo = localStorage.getItem("duitnow_merchant_info");
+    if (savedInfo) {
+      setMerchantAccountInfo(savedInfo);
       setQrUploaded(true);
     }
   }, []);
@@ -132,11 +113,9 @@ export default function HostUploadPage() {
       if (!extracted) {
         throw new Error("Invalid format. Please ensure you upload a valid DuitNow QR.");
       }
-      setAcquirerId(extracted.acquirerId);
-      setQrId(extracted.qrId);
+      setMerchantAccountInfo(extracted);
       setQrUploaded(true);
-      localStorage.setItem("duitnow_acquirer_id", extracted.acquirerId);
-      localStorage.setItem("duitnow_qr_id", extracted.qrId);
+      localStorage.setItem("duitnow_merchant_info", extracted);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to parse DuitNow QR.");
       setQrUploaded(false);
@@ -144,11 +123,9 @@ export default function HostUploadPage() {
   };
 
   const handleChangeAccount = () => {
-    setAcquirerId("");
-    setQrId("");
+    setMerchantAccountInfo("");
     setQrUploaded(false);
-    localStorage.removeItem("duitnow_acquirer_id");
-    localStorage.removeItem("duitnow_qr_id");
+    localStorage.removeItem("duitnow_merchant_info");
     if (qrInputRef.current) qrInputRef.current.value = "";
   };
 
@@ -173,7 +150,7 @@ export default function HostUploadPage() {
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, acquirerId, qrId }),
+          body: JSON.stringify({ imageBase64: base64, merchantAccountInfo }),
         });
 
         const data = await res.json();
@@ -196,7 +173,7 @@ export default function HostUploadPage() {
         fileInputRef.current.value = "";
       }
     },
-    [acquirerId, qrId],
+    [merchantAccountInfo],
   );
 
   // ── Copy share link ────────────────────────────────────
