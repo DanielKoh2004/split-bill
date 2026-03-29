@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-emerald-action: #10B981;
+  --color-dark-slate: #1E293B;
+  --color-coral-red: #FC7C78;
+  --color-neutral-gray: #64748B;
+  --color-off-white: #F8FAFC;
+}
+
+html {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-off-white);
+  margin: 0;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
