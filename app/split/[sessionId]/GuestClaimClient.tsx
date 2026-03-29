@@ -42,7 +42,6 @@ export interface GuestClaimReceipt {
 // Helpers
 // ═══════════════════════════════════════════════════════════
 
-const DUITNOW_ID = "+60123456789";
 const POLL_INTERVAL_MS = 3000;
 
 function formatRM(cents: number): string {
@@ -69,9 +68,11 @@ function getOrCreateGuestId(sessionId: string): string {
 export default function GuestClaimClient({
   receipt,
   sessionId,
+  payeeDuitNowId,
 }: {
   receipt: GuestClaimReceipt;
   sessionId: string;
+  payeeDuitNowId: string;
 }) {
   const items: ReceiptItemDisplay[] = receipt.items;
 
@@ -98,6 +99,8 @@ export default function GuestClaimClient({
   const [copied, setCopied] = useState(false);
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
 
+  const pendingSyncsRef = useRef(0);
+
   const guestIdRef = useRef<string>("");
   if (guestIdRef.current === "") {
     guestIdRef.current = getOrCreateGuestId(sessionId);
@@ -107,6 +110,7 @@ export default function GuestClaimClient({
   // ── Server Sync: POST claim changes ────────────────────
   const syncClaim = useCallback(
     async (itemId: string, quantity: number) => {
+      pendingSyncsRef.current += 1;
       try {
         const res = await fetch("/api/claim", {
           method: "POST",
@@ -128,6 +132,8 @@ export default function GuestClaimClient({
       } catch (err) {
         console.error("Claim sync error:", err);
         return true; // keep local state on network error (graceful degradation)
+      } finally {
+        pendingSyncsRef.current -= 1;
       }
     },
     [sessionId, guestId],
@@ -135,6 +141,7 @@ export default function GuestClaimClient({
 
   // ── Server Sync: Poll for all claims ───────────────────
   const pollClaims = useCallback(async () => {
+    if (pendingSyncsRef.current > 0) return;
     try {
       const res = await fetch(`/api/claim?sessionId=${sessionId}`);
       if (!res.ok) return;
@@ -182,40 +189,45 @@ export default function GuestClaimClient({
   // ── Claim Handlers (optimistic update + server sync) ───
   const toggleSingleItem = useCallback(
     (itemId: string) => {
+      const isClaimed = !!claims[itemId];
+      const newQty = isClaimed ? 0 : 1;
+
       setClaims((prev) => {
         const next = { ...prev };
-        const newQty = next[itemId] ? 0 : 1;
         if (newQty === 0) {
           delete next[itemId];
         } else {
           next[itemId] = 1;
         }
-        // Fire-and-forget sync (revert on conflict via poll)
-        syncClaim(itemId, newQty);
         return next;
       });
+
+      // Fire-and-forget sync (revert on conflict via poll)
+      syncClaim(itemId, newQty);
     },
-    [syncClaim],
+    [claims, syncClaim],
   );
 
   const adjustClaim = useCallback(
     (itemId: string, maxQty: number, delta: number) => {
+      const current = claims[itemId] ?? 0;
+      const othersQty = othersTotals[itemId] ?? 0;
+      const effectiveMax = maxQty - othersQty;
+      const next = Math.max(0, Math.min(effectiveMax, current + delta));
+
       setClaims((prev) => {
-        const current = prev[itemId] ?? 0;
-        const othersQty = othersTotals[itemId] ?? 0;
-        const effectiveMax = maxQty - othersQty;
-        const next = Math.max(0, Math.min(effectiveMax, current + delta));
         const updated = { ...prev };
         if (next === 0) {
           delete updated[itemId];
         } else {
           updated[itemId] = next;
         }
-        syncClaim(itemId, next);
         return updated;
       });
+
+      syncClaim(itemId, next);
     },
-    [syncClaim, othersTotals],
+    [claims, othersTotals, syncClaim],
   );
 
   // ── Backend Calculation ───────────────────────────────
@@ -268,8 +280,8 @@ export default function GuestClaimClient({
   // ── QR Payload ────────────────────────────────────────
   const qrPayload = useMemo(() => {
     if (userTotal <= 0) return "";
-    return generateDuitNowPayload(DUITNOW_ID, userTotal);
-  }, [userTotal]);
+    return generateDuitNowPayload(payeeDuitNowId, userTotal);
+  }, [userTotal, payeeDuitNowId]);
 
   // ── Proportional breakdown (integer math, no floats) ──
   const breakdown = useMemo(() => {
@@ -292,7 +304,7 @@ export default function GuestClaimClient({
   // ── Copy handler ──────────────────────────────────────
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(DUITNOW_ID);
+      await navigator.clipboard.writeText(payeeDuitNowId);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

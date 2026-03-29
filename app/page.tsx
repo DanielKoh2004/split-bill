@@ -33,6 +33,7 @@ export default function HostUploadPage() {
   const [state, setState] = useState<FlowState>("idle");
   const [sessionId, setSessionId] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [duitNowId, setDuitNowId] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -62,7 +63,7 @@ export default function HostUploadPage() {
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64 }),
+          body: JSON.stringify({ imageBase64: base64, payeeDuitNowId: duitNowId }),
         });
 
         const data = await res.json();
@@ -85,7 +86,7 @@ export default function HostUploadPage() {
         fileInputRef.current.value = "";
       }
     },
-    [],
+    [duitNowId],
   );
 
   // ── Copy share link ────────────────────────────────────
@@ -128,6 +129,20 @@ export default function HostUploadPage() {
             generate a share link for your group.
           </p>
 
+          {/* DuitNow ID Input */}
+          <div className="w-full mb-6">
+            <label className="block text-sm font-semibold text-[#1E293B] mb-2 text-left">
+              Your DuitNow ID (Phone Number)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. +60123456789"
+              value={duitNowId}
+              onChange={(e) => setDuitNowId(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-[#10B981] text-center text-lg font-medium"
+            />
+          </div>
+
           {/* Hidden file input */}
           <input
             ref={fileInputRef}
@@ -135,22 +150,27 @@ export default function HostUploadPage() {
             accept="image/*"
             capture="environment"
             onChange={handleFileChange}
+            disabled={!duitNowId.trim()}
             className="hidden"
             id="receipt-upload"
           />
 
           {/* Upload target area */}
           <label
-            htmlFor="receipt-upload"
-            className="
-              block w-full py-16 rounded-3xl border-2 border-dashed border-[#10B981]
-              bg-emerald-50/50 cursor-pointer transition-all duration-200
-              hover:bg-emerald-50 hover:border-[#059669]
-              active:scale-[0.98]
-            "
+            htmlFor={duitNowId.trim() ? "receipt-upload" : undefined}
+            onClick={() => {
+              if (!duitNowId.trim()) setErrorMsg("Please enter your DuitNow ID first.");
+            }}
+            className={`
+              block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200
+              ${duitNowId.trim()
+                ? "border-[#10B981] bg-emerald-50/50 cursor-pointer hover:bg-emerald-50 hover:border-[#059669] active:scale-[0.98]"
+                : "border-slate-300 bg-slate-50 opacity-60 cursor-not-allowed"
+              }
+            `}
           >
-            <Camera className="w-10 h-10 text-[#10B981] mx-auto mb-3" />
-            <span className="text-lg font-bold text-[#10B981]">
+            <Camera className={`w-10 h-10 mx-auto mb-3 ${duitNowId.trim() ? "text-[#10B981]" : "text-slate-400"}`} />
+            <span className={`text-lg font-bold ${duitNowId.trim() ? "text-[#10B981]" : "text-slate-500"}`}>
               Snap Receipt
             </span>
             <span className="block text-xs text-[#64748B] mt-1">

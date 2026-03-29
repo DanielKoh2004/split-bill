@@ -52,11 +52,18 @@ export async function POST(request: NextRequest) {
 
     // 1. Parse request body
     const body = await request.json();
-    const { imageBase64 } = body as { imageBase64?: string };
+    const { imageBase64, payeeDuitNowId } = body as { imageBase64?: string; payeeDuitNowId?: string; };
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid imageBase64 field." },
+        { status: 400 },
+      );
+    }
+
+    if (!payeeDuitNowId || typeof payeeDuitNowId !== "string") {
+      return NextResponse.json(
+        { error: "Missing or invalid payeeDuitNowId field." },
         { status: 400 },
       );
     }
@@ -109,6 +116,7 @@ export async function POST(request: NextRequest) {
       receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
       userClaims: [],
       settlementHash: null,
+      payeeDuitNowId,
     };
     await registerSession(sessionId, sessionData);
 
