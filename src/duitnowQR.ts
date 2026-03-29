@@ -85,9 +85,6 @@ export function modifyEMVCoPayload(
     i += 4 + len;
   }
 
-  // Apply required mutations
-  tags.set("01", "12"); // Force Point of Initiation to Dynamic
-
   // Format amount mathematically
   const ringgit = Math.floor(amountInCents / 100);
   const sen = amountInCents % 100;
