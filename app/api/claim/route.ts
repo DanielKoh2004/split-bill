@@ -3,13 +3,13 @@ import { kv } from "@vercel/kv";
 import type { SessionData } from "@/src/privacy";
 
 // ─────────────────────────────────────────────────────────────
-// POST /api/claim — Atomic item claim via Redis Lua script
+// POST /api/claim — Atomic item claim (exclusive or split mode)
 // GET  /api/claim — Poll all claims for a session
 // ─────────────────────────────────────────────────────────────
 
-// Lua script: atomically validate availability then set the claim directly inside the session JSON.
+// ── Exclusive Claim Lua ─────────────────────────────────────
 // KEYS[1] = sessionId
-// ARGV[1] = itemId, ARGV[2] = guestId, ARGV[3] = new qty, ARGV[4] = max qty
+// ARGV[1] = itemId, ARGV[2] = guestId, ARGV[3] = new qty, ARGV[4] = max qty, ARGV[5] = guestName
 const CLAIM_LUA = `
 local sessionStr = redis.call('GET', KEYS[1])
 if not sessionStr then return -2 end
@@ -19,6 +19,7 @@ local itemId = ARGV[1]
 local guestId = ARGV[2]
 local quantity = tonumber(ARGV[3])
 local maxQty = tonumber(ARGV[4])
+local guestName = ARGV[5]
 
 local othersClaimed = 0
 local prefix = 'claim:' .. itemId .. ':'
@@ -40,10 +41,14 @@ else
   session[myKey] = quantity
 end
 
+-- Store guest name
+if guestName and guestName ~= '' then
+  session['name:' .. guestId] = guestName
+end
+
 local newSessionStr = cjson.encode(session)
 redis.call('SET', KEYS[1], newSessionStr, 'EX', 7200)
 
--- We also maintain the Hash to fulfill the "Keep the GET endpoint exactly the same" requirement seamlessly
 local hashKey = 'claims:' .. KEYS[1]
 if quantity == 0 then
   redis.call('HDEL', hashKey, itemId .. ':' .. guestId)
@@ -52,28 +57,102 @@ else
   redis.call('EXPIRE', hashKey, 7200)
 end
 
+-- Also store name in hash for quick lookups
+if guestName and guestName ~= '' then
+  redis.call('HSET', hashKey, 'name:' .. guestId, guestName)
+  redis.call('EXPIRE', hashKey, 7200)
+end
+
 return 1
 `;
 
+// ── Split (Fractional) Claim Lua ────────────────────────────
+// KEYS[1] = sessionId
+// ARGV[1] = itemId, ARGV[2] = guestId, ARGV[3] = join(1) or leave(0), ARGV[4] = maxSharers(10), ARGV[5] = guestName
+const SPLIT_CLAIM_LUA = `
+local sessionStr = redis.call('GET', KEYS[1])
+if not sessionStr then return -2 end
+local session = cjson.decode(sessionStr)
+
+local itemId = ARGV[1]
+local guestId = ARGV[2]
+local joinOrLeave = tonumber(ARGV[3])
+local maxSharers = tonumber(ARGV[4])
+
+local splitPrefix = 'split:' .. itemId .. ':'
+local myKey = splitPrefix .. guestId
+local guestName = ARGV[5]
+
+-- Count current sharers (excluding self)
+local currentSharers = 0
+for k, v in pairs(session) do
+  if type(k) == 'string' and string.sub(k, 1, string.len(splitPrefix)) == splitPrefix and k ~= myKey then
+    if tonumber(v) == 1 then
+      currentSharers = currentSharers + 1
+    end
+  end
+end
+
+if joinOrLeave == 1 then
+  -- Joining
+  if currentSharers + 1 > maxSharers then
+    return -3
+  end
+  session[myKey] = 1
+else
+  -- Leaving
+  session[myKey] = nil
+end
+
+-- Store guest name
+if guestName and guestName ~= '' then
+  session['name:' .. guestId] = guestName
+end
+
+local newSessionStr = cjson.encode(session)
+redis.call('SET', KEYS[1], newSessionStr, 'EX', 7200)
+
+-- Mirror in hash
+local hashKey = 'claims:' .. KEYS[1]
+if joinOrLeave == 0 then
+  redis.call('HDEL', hashKey, 'split:' .. itemId .. ':' .. guestId)
+else
+  redis.call('HSET', hashKey, 'split:' .. itemId .. ':' .. guestId, 1)
+  redis.call('EXPIRE', hashKey, 7200)
+end
+
+-- Name in hash
+if guestName and guestName ~= '' then
+  redis.call('HSET', hashKey, 'name:' .. guestId, guestName)
+  redis.call('EXPIRE', hashKey, 7200)
+end
+
+return 1
+`;
+
+const MAX_SPLIT_SHARERS = 10;
+
 export async function POST(request: NextRequest) {
   try {
-    const { sessionId, guestId, itemId, quantity } = await request.json();
+    const { sessionId, guestId, itemId, quantity, mode, guestName } = await request.json();
 
-    if (!sessionId || !guestId || !itemId || quantity == null) {
+    if (!sessionId || !guestId || !itemId) {
       return NextResponse.json(
         { error: "Missing required fields." },
         { status: 400 },
       );
     }
 
-    if (!Number.isInteger(quantity) || quantity < 0) {
+    if (!guestName || typeof guestName !== "string" || guestName.trim().length === 0) {
       return NextResponse.json(
-        { error: "quantity must be a non-negative integer." },
+        { error: "Guest name is required." },
         { status: 400 },
       );
     }
 
-    // Look up max quantity from the stored receipt (don't trust the client)
+    const claimMode = mode === "split" ? "split" : "exclusive";
+
+    // Look up item from stored receipt
     const session = await kv.get<SessionData>(sessionId);
     if (!session || !session.receiptJson) {
       return NextResponse.json(
@@ -94,28 +173,62 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Atomic evaluation of the claim against JSON payload
-    const result = await kv.eval(
-      CLAIM_LUA,
-      [sessionId],
-      [itemId, guestId, quantity.toString(), item.quantity.toString()],
-    );
+    if (claimMode === "split") {
+      // Split mode: only for qty-1 items
+      if (item.quantity !== 1) {
+        return NextResponse.json(
+          { error: "Split mode is only available for single-quantity items." },
+          { status: 400 },
+        );
+      }
 
-    if (result === -1) {
-      return NextResponse.json(
-        { error: "Conflict: not enough remaining quantity." },
-        { status: 409 },
-      );
-    }
-    
-    if (result === -2) {
-      return NextResponse.json(
-        { error: "Session logic expired." },
-        { status: 404 },
-      );
-    }
+      const joinOrLeave = quantity > 0 ? 1 : 0;
 
-    return NextResponse.json({ success: true });
+      const result = await kv.eval(
+        SPLIT_CLAIM_LUA,
+        [sessionId],
+        [itemId, guestId, joinOrLeave.toString(), MAX_SPLIT_SHARERS.toString(), guestName.trim()],
+      );
+
+      if (result === -2) {
+        return NextResponse.json({ error: "Session logic expired." }, { status: 404 });
+      }
+      if (result === -3) {
+        return NextResponse.json(
+          { error: `Max ${MAX_SPLIT_SHARERS} people can share an item.` },
+          { status: 409 },
+        );
+      }
+
+      return NextResponse.json({ success: true });
+    } else {
+      // Exclusive mode (original behavior)
+      if (quantity == null || !Number.isInteger(quantity) || quantity < 0) {
+        return NextResponse.json(
+          { error: "quantity must be a non-negative integer." },
+          { status: 400 },
+        );
+      }
+
+      const result = await kv.eval(
+        CLAIM_LUA,
+        [sessionId],
+        [itemId, guestId, quantity.toString(), item.quantity.toString(), guestName.trim()],
+      );
+
+      if (result === -1) {
+        return NextResponse.json(
+          { error: "Conflict: not enough remaining quantity." },
+          { status: 409 },
+        );
+      }
+
+      if (result === -2) {
+        return NextResponse.json({ error: "Session logic expired." }, { status: 404 });
+      }
+
+      return NextResponse.json({ success: true });
+    }
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown server error";

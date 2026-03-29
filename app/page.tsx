@@ -1,40 +1,38 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
+  UploadCloud,
+  CheckCircle2,
+  AlertCircle,
+  Copy,
+  ArrowRight,
   Camera,
   Loader2,
-  CheckCircle2,
-  Copy,
-  AlertCircle,
-  UploadCloud,
-  ArrowRight,
   Pencil,
   Trash2,
-  Settings,
   Tag,
+  Settings,
+  Server,
+  Users,
+  Image as ImageIcon,
 } from "lucide-react";
-import { sanitizeImage } from "@/src/privacy";
-import jsQR from "jsqr";
 import Link from "next/link";
+import { parseQRImage } from "@/src/duitnowQR";
+import { sanitizeImage, blobToBase64 } from "@/src/privacy";
+import { useAppContext } from "@/src/ThemeContext";
+import ToggleBar from "@/app/components/ToggleBar";
 
-// ─────────────────────────────────────────────────────────────
-// constraints.md compliance:
-//   ✅ Client-side EXIF strip via sanitizeImage (Module 4)
-//   ✅ No raw File sent to API — only sanitized base64
-//   ✅ No persistent storage — ephemeral session only
-//   ✅ Stateless — session ID returned, no user accounts
-//   ✅ Two-phase: Upload → Review → Finalize
-// ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════
 
 type FlowState = "idle" | "loading" | "review" | "success" | "error";
 
 interface ReviewItem {
   id: string;
   name: string;
-  quantity: number;
   priceInCents: number;
-  sectionName?: string;
 }
 
 interface ReviewReceipt {
@@ -52,68 +50,28 @@ interface LastSession {
   timestamp: number;
 }
 
-/** Convert a Blob to a base64 string (no data URI prefix). */
-async function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const base64 = result.split(",")[1];
-      resolve(base64);
-    };
-    reader.onerror = () => reject(new Error("Failed to read file"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function parseQRImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return reject(new Error("Canvas context not supported"));
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height);
-      if (code && code.data) {
-        resolve(code.data);
-      } else {
-        reject(new Error("No valid QR code found in the image."));
-      }
-    };
-    img.onerror = () => reject(new Error("Failed to load image."));
-    img.src = URL.createObjectURL(file);
-  });
-}
-
-/** Format cents to RM display */
-function formatRM(cents: number): string {
-  return `RM ${(cents / 100).toFixed(2)}`;
-}
-
-// ── 24-hour freshness check ─────────────────────────────────
-const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
-
 function getLastSession(): LastSession | null {
   if (typeof window === "undefined") return null;
+  const data = localStorage.getItem("last_active_session");
+  if (!data) return null;
   try {
-    const raw = localStorage.getItem("last_active_session");
-    if (!raw) return null;
-    const parsed: LastSession = JSON.parse(raw);
-    if (Date.now() - parsed.timestamp > TWENTY_FOUR_HOURS_MS) {
-      localStorage.removeItem("last_active_session");
-      return null;
-    }
-    return parsed;
+    return JSON.parse(data) as LastSession;
   } catch {
     return null;
   }
 }
 
+function formatRM(cents: number): string {
+  return `RM ${(cents / 100).toFixed(2)}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// Component
+// ═══════════════════════════════════════════════════════════
+
 export default function HostUploadPage() {
+  const { t } = useAppContext();
+
   const [mounted, setMounted] = useState(false);
   const [state, setState] = useState<FlowState>("idle");
   const [sessionId, setSessionId] = useState<string>("");
@@ -133,10 +91,18 @@ export default function HostUploadPage() {
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [isFinalizingReview, setIsFinalizingReview] = useState(false);
+  
+  // Privacy features
+  const [sanitizedImageBase64, setSanitizedImageBase64] = useState<string>("");
+  const [includeReceiptPreview, setIncludeReceiptPreview] = useState(false);
 
   // ── Host Continuity ─────────────────────────────────────
   const [lastSession, setLastSession] = useState<LastSession | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  // ── Live Dashboard State ────────────────────────────────
+  const [liveStatus, setLiveStatus] = useState<any>(null);
+  const [isWiping, setIsWiping] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -147,6 +113,41 @@ export default function HostUploadPage() {
     }
     setLastSession(getLastSession());
   }, []);
+
+  // Poll live status if idle and has lastSession
+  useEffect(() => {
+    if (state !== "idle" || !lastSession || !originalQrString) return;
+
+    let isSubscribed = true;
+
+    async function poll() {
+      try {
+        const res = await fetch(`/api/session/status?sessionId=${lastSession?.sessionId}`, {
+          headers: {
+            "x-qr-proof": originalQrString,
+          },
+        });
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 403) {
+            // Session gone or invalid proof
+            setLiveStatus(null);
+          }
+          return;
+        }
+        const data = await res.json();
+        if (isSubscribed) setLiveStatus(data);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    poll();
+    const timer = setInterval(poll, 5000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(timer);
+    };
+  }, [state, lastSession, originalQrString]);
 
   const shareUrl =
     typeof window !== "undefined" && sessionId
@@ -192,8 +193,10 @@ export default function HostUploadPage() {
       try {
         const sanitizedBlob = await sanitizeImage(file);
         const base64 = await blobToBase64(sanitizedBlob);
+        
+        // Save for the finalize phase
+        setSanitizedImageBase64(base64);
 
-        // Phase 1: Upload for AI parsing only (no session created)
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -206,9 +209,9 @@ export default function HostUploadPage() {
           throw new Error(data.error || "Upload failed");
         }
 
-        // Transition to review state with the parsed receipt
         setReviewReceipt(data.enrichedReceipt as ReviewReceipt);
         setSectionName("");
+        setIncludeReceiptPreview(false); // default off!
         setState("review");
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Something went wrong";
@@ -220,7 +223,7 @@ export default function HostUploadPage() {
         fileInputRef.current.value = "";
       }
     },
-    [originalQrString],
+    [],
   );
 
   // ── Review: Edit item ─────────────────────────────────
@@ -242,7 +245,6 @@ export default function HostUploadPage() {
         : item
     );
 
-    // Recalculate subtotal from items
     const newSubtotal = updatedItems.reduce((sum, i) => sum + i.priceInCents, 0);
     const newGrandTotal = newSubtotal + reviewReceipt.taxInCents + reviewReceipt.serviceChargeInCents;
 
@@ -267,7 +269,7 @@ export default function HostUploadPage() {
   const removeItem = (itemId: string) => {
     if (!reviewReceipt) return;
     const updatedItems = reviewReceipt.items.filter((i) => i.id !== itemId);
-    if (updatedItems.length === 0) return; // Don't allow removing all items
+    if (updatedItems.length === 0) return;
 
     const newSubtotal = updatedItems.reduce((sum, i) => sum + i.priceInCents, 0);
     const newGrandTotal = newSubtotal + reviewReceipt.taxInCents + reviewReceipt.serviceChargeInCents;
@@ -288,7 +290,6 @@ export default function HostUploadPage() {
     setErrorMsg("");
 
     try {
-      // Tag items with section name if provided
       const section = sectionName.trim() || undefined;
       const receiptToSend = {
         ...reviewReceipt,
@@ -298,7 +299,6 @@ export default function HostUploadPage() {
         })),
       };
 
-      // Recalculate totals to be safe
       const newSubtotal = receiptToSend.items.reduce((sum, i) => sum + i.priceInCents, 0);
       receiptToSend.subtotalInCents = newSubtotal;
       receiptToSend.grandTotalInCents = newSubtotal + receiptToSend.taxInCents + receiptToSend.serviceChargeInCents;
@@ -310,6 +310,7 @@ export default function HostUploadPage() {
           receipt: receiptToSend,
           originalQrString,
           mergeSessionId: mergeSessionId.trim() || undefined,
+          imageBase64: includeReceiptPreview ? sanitizedImageBase64 : undefined,
         }),
       });
 
@@ -321,7 +322,6 @@ export default function HostUploadPage() {
 
       setSessionId(data.sessionId);
 
-      // Persist last session for Host Continuity
       const sessionInfo: LastSession = {
         sessionId: data.sessionId,
         timestamp: Date.now(),
@@ -372,6 +372,7 @@ export default function HostUploadPage() {
     setSectionName("");
     setEditingItemId(null);
     setIsFinalizingReview(false);
+    setLiveStatus(null);
   };
 
   // ── Clear All Sessions ─────────────────────────────────
@@ -383,6 +384,7 @@ export default function HostUploadPage() {
     setOriginalQrString("");
     setQrUploaded(false);
     setShowSettings(false);
+    setLiveStatus(null);
     if (qrInputRef.current) qrInputRef.current.value = "";
   };
 
@@ -393,17 +395,125 @@ export default function HostUploadPage() {
     }
   };
 
+  // ── Wipe Session ──────────────────────────────────────
+  const handleWipeSession = async () => {
+    if (!lastSession) return;
+    const ok = window.confirm(t.wipeConfirm);
+    if (!ok) return;
+
+    setIsWiping(true);
+    try {
+      const res = await fetch("/api/session/wipe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-qr-proof": originalQrString,
+        },
+        body: JSON.stringify({ sessionId: lastSession.sessionId }),
+      });
+      if (!res.ok) throw new Error("Failed to wipe");
+      
+      localStorage.removeItem("last_active_session");
+      setLastSession(null);
+      setLiveStatus(null);
+      alert(t.sessionWiped);
+    } catch (e) {
+      alert("Error wiping session.");
+    } finally {
+      setIsWiping(false);
+    }
+  };
+
+  // ── Calculate Live Dashboard Stats ─────────────────────
+  let totalClaimedCents = 0;
+  let unclaimedItemsList: { name: string; qty: number; price: number }[] = [];
+  const guestTotals = new Map<string, { name: string; sum: number }>();
+
+  if (liveStatus && liveStatus.receipt && liveStatus.claims) {
+    const claimsMap = liveStatus.claims;
+    const items = liveStatus.receipt.items as { id: string; name: string; quantity: number; priceInCents: number }[];
+    
+    // Pass 1: find names
+    const names = new Map<string, string>();
+    for (const [key, val] of Object.entries(claimsMap)) {
+      if (key.startsWith("name:")) {
+        names.set(key.substring(5), val as string);
+      }
+    }
+
+    // Pass 2: calculate items
+    for (const item of items) {
+      let claimedQty = 0;
+      let splitSharers = 0;
+      let isSplit = false;
+
+      // Extract claims for this item
+      const itemClaims = [];
+      const itemSplits = [];
+      
+      for (const [key, val] of Object.entries(claimsMap)) {
+        if (key.startsWith("name:")) continue;
+        
+        if (key.startsWith("split:" + item.id + ":")) {
+          isSplit = true;
+          itemSplits.push({ guestId: key.split(":")[2] });
+          splitSharers++;
+        } else if (key.startsWith(item.id + ":")) {
+          const qty = Number(val);
+          claimedQty += qty;
+          itemClaims.push({ guestId: key.split(":")[1], qty });
+        }
+      }
+
+      const price = item.priceInCents;
+      let costPerUnit = price;
+      
+      if (isSplit && splitSharers > 0) {
+        costPerUnit = Math.floor(price / splitSharers);
+        // allocate
+        for (const s of itemSplits) {
+          totalClaimedCents += costPerUnit;
+          const prev = guestTotals.get(s.guestId)?.sum || 0;
+          const gName = names.get(s.guestId) || `Guest ${s.guestId.substring(0, 4)}`;
+          guestTotals.set(s.guestId, { name: gName, sum: prev + costPerUnit });
+        }
+      } else {
+        // exclusive
+        if (item.quantity > 1) {
+          costPerUnit = Math.floor(price / item.quantity);
+        }
+        for (const c of itemClaims) {
+          const sumCost = costPerUnit * c.qty;
+          totalClaimedCents += sumCost;
+          const prev = guestTotals.get(c.guestId)?.sum || 0;
+          const gName = names.get(c.guestId) || `Guest ${c.guestId.substring(0, 4)}`;
+          guestTotals.set(c.guestId, { name: gName, sum: prev + sumCost });
+        }
+        
+        const remaining = item.quantity - claimedQty;
+        if (remaining > 0) {
+          unclaimedItemsList.push({ name: item.name, qty: remaining, price: costPerUnit });
+        }
+      }
+    }
+  }
+
+  const progressPercent = liveStatus?.receipt ? Math.min(100, Math.round((totalClaimedCents / liveStatus.receipt.subtotalInCents) * 100)) : 0;
+
   // ═══════════════════════════════════════════════════════
   // Render
   // ═══════════════════════════════════════════════════════
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 flex flex-col items-center justify-center px-5 relative">
+    <div className="max-w-md mx-auto min-h-screen bg-themed flex flex-col items-center justify-center px-5 relative">
+      {/* ── Toggle Bar (Dark/Light + Language) ──────────── */}
+      <ToggleBar />
+
       {/* Settings Button */}
       {state === "idle" && mounted && (
         <button
           onClick={() => setShowSettings(!showSettings)}
-          className="absolute top-5 right-5 w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-all shadow-sm"
+          className="absolute top-5 right-5 w-10 h-10 rounded-xl bg-card-themed border border-themed flex items-center justify-center text-muted-themed hover:text-primary-themed transition-all shadow-card-themed"
           aria-label="Settings"
         >
           <Settings className="w-5 h-5" />
@@ -412,19 +522,19 @@ export default function HostUploadPage() {
 
       {/* Settings Dropdown */}
       {showSettings && (
-        <div className="absolute top-16 right-5 bg-white rounded-2xl shadow-xl border border-slate-100 p-4 z-50 w-64 animate-[slideDown_0.2s_ease-out]">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
-            Session Controls
+        <div className="absolute top-16 right-5 bg-card-themed rounded-2xl shadow-elevated-themed border border-themed p-4 z-50 w-64 animate-[slideDown_0.2s_ease-out]">
+          <p className="text-xs font-semibold text-muted-themed uppercase tracking-wider mb-3">
+            {t.sessionControls}
           </p>
           <button
             onClick={handleClearAll}
-            className="w-full py-3 px-4 rounded-xl bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 transition-colors flex items-center gap-2"
+            className="w-full py-3 px-4 rounded-xl bg-red-500/10 text-red-500 text-sm font-semibold hover:bg-red-500/20 transition-colors flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
-            Clear All Sessions
+            {t.clearAllSessions}
           </button>
-          <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-            Removes saved QR, session history, and pending bills. Use this to start fresh.
+          <p className="text-xs text-muted-themed mt-2 leading-relaxed">
+            {t.clearAllDesc}
           </p>
         </div>
       )}
@@ -439,7 +549,7 @@ export default function HostUploadPage() {
 
       {/* Inline Error Notice */}
       {state === "idle" && errorMsg && (
-        <div className="absolute top-10 left-5 right-5 bg-red-50 text-red-600 text-sm font-semibold p-4 rounded-xl shadow-sm text-center border border-red-100 flex items-center justify-center gap-2">
+        <div className="absolute top-10 left-5 right-5 bg-red-500/10 text-red-500 text-sm font-semibold p-4 rounded-xl shadow-sm text-center border border-red-500/20 flex items-center justify-center gap-2">
           <AlertCircle className="w-5 h-5" />
           {errorMsg}
         </div>
@@ -447,16 +557,16 @@ export default function HostUploadPage() {
 
       {/* ── IDLE: Upload State ─────────────────────────── */}
       {state === "idle" && (
-        <div className="w-full text-center">
+        <div className="w-full text-center py-10">
           {/* Resume Current Session Badge */}
           {mounted && lastSession && (
             <Link
               href={`/split/${lastSession.sessionId}`}
-              className="w-full mb-6 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold text-sm flex items-center justify-between shadow-lg shadow-emerald-200/50 hover:shadow-emerald-300/50 transition-all active:scale-[0.98] no-underline"
+              className="w-full mb-4 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold text-sm flex items-center justify-between shadow-lg shadow-emerald-200/50 hover:shadow-emerald-300/50 transition-all active:scale-[0.98] no-underline"
             >
               <span className="flex items-center gap-2">
                 <ArrowRight className="w-4 h-4" />
-                Resume Current Session
+                {t.resumeCurrentSession}
               </span>
               <span className="font-mono text-xs opacity-80 bg-white/20 px-2 py-1 rounded-lg">
                 {lastSession.sessionId}
@@ -464,30 +574,116 @@ export default function HostUploadPage() {
             </Link>
           )}
 
+          {/* ── Live Dashboard ────────────────────────────── */}
+          {mounted && liveStatus && (
+            <div className="w-full bg-card-themed border-2 border-[#10B981] rounded-3xl shadow-[0_0_20px_rgba(16,185,129,0.15)] p-5 mb-8 text-left relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-[#10B981]/20">
+                <div 
+                  className="h-full bg-[#10B981] transition-all duration-1000 ease-out"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between mb-4 mt-1">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <h3 className="font-bold text-primary-themed">{t.liveDashboard}</h3>
+                </div>
+                <Link href={`/split/${lastSession?.sessionId}`} className="text-xs text-[#10B981] font-semibold hover:underline">
+                  View link
+                </Link>
+              </div>
+
+              {/* Progress */}
+              <div className="mb-4 bg-elevated-themed p-3 rounded-xl border border-themed">
+                <p className="text-xs text-secondary-themed uppercase tracking-wider font-semibold mb-1">{t.settlementProgress}</p>
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xl font-bold text-primary-themed">{formatRM(totalClaimedCents)}</span>
+                  <span className="text-sm text-secondary-themed">{t.of} {formatRM(liveStatus.receipt.subtotalInCents)} {t.claimedOf}</span>
+                </div>
+              </div>
+
+              {/* Guest List */}
+              {guestTotals.size > 0 ? (
+                <div className="mb-4">
+                  <p className="text-xs text-secondary-themed uppercase tracking-wider font-semibold mb-2">{t.guestList}</p>
+                  <div className="space-y-2">
+                    {Array.from(guestTotals.values()).map((g, i) => (
+                      <div key={i} className="flex justify-between items-center bg-elevated-themed p-2.5 rounded-lg border border-themed">
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-emerald-500" />
+                          <span className="text-sm font-medium text-primary-themed">{g.name}</span>
+                        </div>
+                        <span className="text-sm font-bold text-primary-themed">{formatRM(g.sum)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-secondary-themed bg-elevated-themed p-3 rounded-xl border border-themed mb-4 text-center">
+                  {t.noActivity}
+                </p>
+              )}
+
+              {/* Unclaimed Items */}
+              {unclaimedItemsList.length > 0 ? (
+                <div className="mb-5">
+                  <p className="text-xs text-amber-500 uppercase tracking-wider font-semibold mb-2 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    {t.unclaimedItems}
+                  </p>
+                  <div className="space-y-1">
+                    {unclaimedItemsList.map((u, i) => (
+                      <div key={i} className="flex justify-between text-sm">
+                        <span className="text-secondary-themed truncate mr-2">{u.qty}x {u.name}</span>
+                        <span className="text-primary-themed font-medium shrink-0">{formatRM(u.price * u.qty)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold border border-emerald-500/20">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {t.fullyClaimedBadge}
+                </div>
+              )}
+
+              <button
+                onClick={handleWipeSession}
+                disabled={isWiping}
+                className="w-full py-3 rounded-xl bg-red-500/10 text-red-500 font-bold text-sm border border-red-500/20 hover:bg-red-500 hover:text-white transition-all duration-200 flex items-center justify-center gap-2 mt-2"
+              >
+                {isWiping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Server className="w-4 h-4" />}
+                {isWiping ? t.wiping : t.wipeSession}
+              </button>
+
+            </div>
+          )}
+
           <div className="w-16 h-16 bg-[#10B981] rounded-2xl flex items-center justify-center mx-auto mb-6">
             <Camera className="w-8 h-8 text-white" />
           </div>
 
-          <h1 className="text-2xl font-bold text-[#1E293B] mb-2">
-            Split the Bill
+          <h1 className="text-2xl font-bold text-primary-themed mb-2">
+            {t.splitTheBill}
           </h1>
-          <p className="text-sm text-[#64748B] mb-8 leading-relaxed">
-            Upload your QR and snap your receipt. AI will crunch it natively and safely.
+          <p className="text-sm text-secondary-themed mb-8 leading-relaxed">
+            {t.uploadDesc}
           </p>
 
           {/* DuitNow QR Upload Section */}
           <div className="w-full mb-6">
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-semibold text-[#1E293B] text-left">
-                Your Personal DuitNow QR
+              <label className="block text-sm font-semibold text-primary-themed text-left">
+                {t.yourDuitNowQR}
               </label>
               {mounted && qrUploaded && (
                 <button
                   type="button"
                   onClick={handleChangeAccount}
-                  className="text-xs text-[#64748B] hover:text-[#1E293B] underline underline-offset-2 transition-colors"
+                  className="text-xs text-secondary-themed hover:text-primary-themed underline underline-offset-2 transition-colors"
                 >
-                  Change Account
+                  {t.changeAccount}
                 </button>
               )}
             </div>
@@ -504,22 +700,19 @@ export default function HostUploadPage() {
                 />
                 <label
                   htmlFor="qr-upload"
-                  className={`
-                    block w-full py-4 rounded-xl border-2 transition-all duration-200 cursor-pointer flex items-center justify-center gap-3
-                    bg-white border-slate-200 text-slate-500 hover:border-slate-300
-                  `}
+                  className="block w-full py-4 rounded-xl border-2 transition-all duration-200 cursor-pointer flex items-center justify-center gap-3 bg-card-themed border-themed text-secondary-themed hover:border-[#10B981]/50"
                 >
                   <UploadCloud className="w-5 h-5" />
                   <span className="font-semibold text-sm">
-                    Upload QR Screenshot
+                    {t.uploadQRScreenshot}
                   </span>
                 </label>
               </>
             ) : (
-              <div className="w-full py-4 rounded-xl border-2 border-[#10B981] bg-emerald-50 text-[#10B981] flex items-center justify-center gap-3 cursor-default">
+              <div className="w-full py-4 rounded-xl border-2 border-[#10B981] bg-[#10B981]/10 text-[#10B981] flex items-center justify-center gap-3 cursor-default">
                 <CheckCircle2 className="w-5 h-5" />
                 <span className="font-semibold text-sm">
-                  ✓ Saved DuitNow Account Active
+                  {t.savedDuitNowActive}
                 </span>
               </div>
             )}
@@ -541,45 +734,45 @@ export default function HostUploadPage() {
           <label
             htmlFor={qrUploaded ? "receipt-upload" : undefined}
             onClick={() => {
-              if (!qrUploaded) setErrorMsg("Please upload your DuitNow QR screenshot first.");
+              if (!qrUploaded) setErrorMsg(t.uploadQrFirst);
             }}
             className={`
               block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200 mb-4
               ${qrUploaded
-                ? "border-[#10B981] bg-emerald-50/50 cursor-pointer hover:bg-emerald-50 hover:border-[#059669] active:scale-[0.98]"
-                : "border-slate-300 bg-slate-50 opacity-60 cursor-not-allowed"
+                ? "border-[#10B981] bg-[#10B981]/5 cursor-pointer hover:bg-[#10B981]/10 hover:border-[#059669] active:scale-[0.98]"
+                : "border-themed bg-elevated-themed opacity-60 cursor-not-allowed"
               }
             `}
           >
-            <Camera className={`w-10 h-10 mx-auto mb-3 ${qrUploaded ? "text-[#10B981]" : "text-slate-400"}`} />
-            <span className={`text-lg font-bold ${qrUploaded ? "text-[#10B981]" : "text-slate-500"}`}>
-              Snap Receipt
+            <Camera className={`w-10 h-10 mx-auto mb-3 ${qrUploaded ? "text-[#10B981]" : "text-muted-themed"}`} />
+            <span className={`text-lg font-bold ${qrUploaded ? "text-[#10B981]" : "text-secondary-themed"}`}>
+              {t.snapReceipt}
             </span>
-            <span className="block text-xs text-[#64748B] mt-1">
-              EXIF data will be stripped automatically
+            <span className="block text-xs text-secondary-themed mt-1">
+              {t.exifStripped}
             </span>
           </label>
 
           {/* Merge Session Input */}
           <div className="w-full text-left mb-6">
-            <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-2">
-              Merge with existing bill (Optional)
+            <label className="block text-xs font-semibold text-secondary-themed uppercase tracking-wider mb-2">
+              {t.mergeWithExisting}
             </label>
             <input
               type="text"
-              placeholder="Paste existing Session ID here"
+              placeholder={t.pasteSessionId}
               value={mergeSessionId}
               onChange={(e) => setMergeSessionId(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none transition-all placeholder:text-slate-400"
+              className="w-full px-4 py-3 rounded-xl border border-themed bg-input-themed text-primary-themed text-sm focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none transition-all placeholder:text-muted-themed"
             />
             {/* Use Last Session shortcut */}
             {mounted && lastSession && (
               <button
                 onClick={handleUseLastSession}
-                className="mt-2 px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-colors flex items-center gap-1.5"
+                className="mt-2 px-3 py-1.5 rounded-lg bg-elevated-themed text-secondary-themed text-xs font-semibold hover:text-primary-themed transition-colors flex items-center gap-1.5"
               >
                 <ArrowRight className="w-3 h-3" />
-                Use Last Session ({lastSession.sessionId})
+                {t.useLastSession} ({lastSession.sessionId})
               </button>
             )}
           </div>
@@ -589,18 +782,17 @@ export default function HostUploadPage() {
       {/* ── LOADING: AI Processing ────────────────────── */}
       {state === "loading" && (
         <div className="w-full text-center">
-          <div className="w-16 h-16 bg-[#1E293B] rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <Loader2 className="w-8 h-8 text-white animate-spin" />
+          <div className="w-16 h-16 bg-card-themed rounded-2xl flex items-center justify-center mx-auto mb-6 border border-themed">
+            <Loader2 className="w-8 h-8 text-[#10B981] animate-spin" />
           </div>
 
-          <h2 className="text-xl font-bold text-[#1E293B] mb-2">
-            AI is crunching the numbers...
+          <h2 className="text-xl font-bold text-primary-themed mb-2">
+            {t.aiCrunching}
           </h2>
-          <p className="text-sm text-[#64748B]">
-            Parsing receipt, validating math, generating draft.
+          <p className="text-sm text-secondary-themed">
+            {t.parsingReceipt}
           </p>
 
-          {/* Pulsing dots */}
           <div className="flex items-center justify-center gap-2 mt-6">
             {[0, 1, 2].map((i) => (
               <div
@@ -615,75 +807,73 @@ export default function HostUploadPage() {
 
       {/* ── REVIEW: Editable Receipt ──────────────────── */}
       {state === "review" && reviewReceipt && (
-        <div className="w-full pb-8">
-          {/* Header */}
+        <div className="w-full pb-8 pt-10">
           <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 bg-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-400">
               <Pencil className="w-8 h-8 text-white" />
             </div>
-            <h2 className="text-xl font-bold text-[#1E293B] mb-1">
-              Review & Edit
+            <h2 className="text-xl font-bold text-primary-themed mb-1">
+              {t.reviewAndEdit}
             </h2>
-            <p className="text-sm text-[#64748B]">
-              Tap any item to edit its name or price before sharing.
+            <p className="text-sm text-secondary-themed">
+              {t.tapAnyItem}
             </p>
           </div>
 
           {/* Merchant & Date */}
-          <div className="bg-white rounded-2xl p-4 mb-4 border border-slate-100 shadow-sm">
-            <p className="text-lg font-bold text-[#1E293B]">{reviewReceipt.merchantName}</p>
-            <p className="text-sm text-[#64748B]">{reviewReceipt.date}</p>
+          <div className="bg-card-themed rounded-2xl p-4 mb-4 border border-themed shadow-card-themed">
+            <p className="text-lg font-bold text-primary-themed">{reviewReceipt.merchantName}</p>
+            <p className="text-sm text-secondary-themed">{reviewReceipt.date}</p>
           </div>
 
           {/* Section Name Input */}
           <div className="mb-4">
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-2">
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-secondary-themed uppercase tracking-wider mb-2">
               <Tag className="w-3.5 h-3.5" />
-              Section Name (Trip Mode)
+              {t.sectionNameLabel}
             </label>
             <input
               type="text"
-              placeholder='e.g., "Dinner at Guangzhou", "Day 2 Coffee"'
+              placeholder={t.sectionPlaceholder}
               value={sectionName}
               onChange={(e) => setSectionName(e.target.value)}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all placeholder:text-slate-400"
+              className="w-full px-4 py-3 rounded-xl border border-themed bg-input-themed text-primary-themed text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all placeholder:text-muted-themed"
             />
           </div>
 
           {/* Editable Items */}
           <div className="space-y-2 mb-4">
-            <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-              Items ({reviewReceipt.items.length})
+            <span className="text-xs font-semibold text-secondary-themed uppercase tracking-wider">
+              {t.items} ({reviewReceipt.items.length})
             </span>
 
             {reviewReceipt.items.map((item) => (
               <div
                 key={item.id}
-                className={`bg-white rounded-xl p-4 border transition-all duration-200 ${
+                className={`bg-card-themed rounded-xl p-4 border transition-all duration-200 ${
                   editingItemId === item.id
-                    ? "border-amber-400 shadow-md"
-                    : "border-slate-100 shadow-sm"
+                    ? "border-amber-400 shadow-elevated-themed"
+                    : "border-themed shadow-card-themed"
                 }`}
               >
                 {editingItemId === item.id ? (
-                  /* Editing Mode */
                   <div className="space-y-3">
                     <input
                       type="text"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-semibold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
-                      placeholder="Item name"
+                      className="w-full px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                      placeholder={t.itemName}
                       autoFocus
                     />
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-[#64748B] font-medium">RM</span>
+                      <span className="text-sm text-secondary-themed font-medium">RM</span>
                       <input
                         type="number"
                         step="0.01"
                         value={editPrice}
                         onChange={(e) => setEditPrice(e.target.value)}
-                        className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm font-semibold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
+                        className="flex-1 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
                         placeholder="0.00"
                       />
                     </div>
@@ -692,27 +882,26 @@ export default function HostUploadPage() {
                         onClick={saveEditItem}
                         className="flex-1 py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 transition-colors"
                       >
-                        Save
+                        {t.save}
                       </button>
                       <button
                         onClick={cancelEdit}
-                        className="flex-1 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors"
+                        className="flex-1 py-2 rounded-lg bg-elevated-themed text-secondary-themed text-sm font-semibold hover:text-primary-themed transition-colors"
                       >
-                        Cancel
+                        {t.cancel}
                       </button>
                     </div>
                   </div>
                 ) : (
-                  /* Display Mode */
                   <div className="flex items-center justify-between">
                     <button
                       onClick={() => startEditItem(item)}
                       className="flex-1 text-left min-w-0 mr-3"
                     >
-                      <p className="font-semibold text-[#1E293B] truncate text-sm">
+                      <p className="font-semibold text-primary-themed truncate text-sm">
                         {item.name}
                       </p>
-                      <p className="text-xs text-[#64748B] mt-0.5">
+                      <p className="text-xs text-secondary-themed mt-0.5">
                         {formatRM(item.priceInCents)}
                         {item.quantity > 1 && ` · Qty: ${item.quantity}`}
                       </p>
@@ -720,7 +909,7 @@ export default function HostUploadPage() {
                     <div className="flex items-center gap-1 shrink-0">
                       <button
                         onClick={() => startEditItem(item)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-amber-500 hover:bg-amber-50 transition-colors"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-themed hover:text-amber-500 hover:bg-amber-500/10 transition-colors"
                         aria-label={`Edit ${item.name}`}
                       >
                         <Pencil className="w-4 h-4" />
@@ -728,7 +917,7 @@ export default function HostUploadPage() {
                       {reviewReceipt.items.length > 1 && (
                         <button
                           onClick={() => removeItem(item.id)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-themed hover:text-red-500 hover:bg-red-500/10 transition-colors"
                           aria-label={`Remove ${item.name}`}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -742,37 +931,58 @@ export default function HostUploadPage() {
           </div>
 
           {/* Totals Summary */}
-          <div className="bg-white rounded-2xl p-4 mb-6 border border-slate-100 shadow-sm">
-            <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
-              Totals
+          <div className="bg-card-themed rounded-2xl p-4 mb-4 border border-themed shadow-card-themed">
+            <span className="text-xs font-semibold text-secondary-themed uppercase tracking-wider">
+              {t.totals}
             </span>
             <div className="space-y-1.5 mt-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-[#64748B]">Subtotal</span>
-                <span className="text-[#1E293B] font-medium font-mono">
+                <span className="text-secondary-themed">{t.subtotal}</span>
+                <span className="text-primary-themed font-medium font-mono">
                   {formatRM(reviewReceipt.subtotalInCents)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#64748B]">SST (Tax)</span>
-                <span className="text-[#1E293B] font-medium font-mono">
+                <span className="text-secondary-themed">{t.sstTax}</span>
+                <span className="text-primary-themed font-medium font-mono">
                   {formatRM(reviewReceipt.taxInCents)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[#64748B]">Service Charge</span>
-                <span className="text-[#1E293B] font-medium font-mono">
+                <span className="text-secondary-themed">{t.serviceCharge}</span>
+                <span className="text-primary-themed font-medium font-mono">
                   {formatRM(reviewReceipt.serviceChargeInCents)}
                 </span>
               </div>
-              <div className="border-t border-slate-100 pt-2 mt-2 flex justify-between">
-                <span className="font-bold text-[#1E293B]">Grand Total</span>
-                <span className="font-bold text-[#1E293B] font-mono text-lg">
+              <div className="border-t border-themed pt-2 mt-2 flex justify-between">
+                <span className="font-bold text-primary-themed">{t.grandTotal}</span>
+                <span className="font-bold text-primary-themed font-mono text-lg">
                   {formatRM(reviewReceipt.grandTotalInCents)}
                 </span>
               </div>
             </div>
           </div>
+
+          {/* Privacy Toggle for Receipt Image */}
+          <label className="flex items-start gap-3 p-4 rounded-2xl bg-card-themed border border-themed shadow-sm mb-6 cursor-pointer hover:bg-elevated-themed transition-colors">
+            <div className="flex items-center h-5 mt-0.5">
+              <input
+                type="checkbox"
+                checked={includeReceiptPreview}
+                onChange={(e) => setIncludeReceiptPreview(e.target.checked)}
+                className="w-5 h-5 rounded border-2 border-themed text-[#10B981] focus:ring-[#10B981] bg-input-themed"
+              />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-primary-themed flex items-center gap-1.5">
+                <ImageIcon className="w-4 h-4 text-[#10B981]" />
+                {t.includeReceiptPreview}
+              </p>
+              <p className="text-xs text-secondary-themed mt-1 leading-relaxed">
+                {t.includeReceiptPreviewDesc}
+              </p>
+            </div>
+          </label>
 
           {/* Finalize Button */}
           <button
@@ -781,57 +991,55 @@ export default function HostUploadPage() {
             className={`
               w-full py-4 rounded-2xl text-white font-bold text-lg
               flex items-center justify-center gap-2 transition-all duration-200
-              shadow-lg mb-3
+              shadow-lg mb-4
               ${isFinalizingReview
-                ? "bg-slate-300 cursor-not-allowed"
-                : "bg-[#10B981] active:bg-emerald-600 shadow-emerald-200 hover:shadow-emerald-300"
+                ? "bg-slate-400 cursor-not-allowed"
+                : "bg-[#10B981] active:bg-emerald-600 shadow-emerald-500/20 hover:shadow-emerald-500/30"
               }
             `}
           >
             {isFinalizingReview ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                Finalizing...
+                {t.finalizing}
               </>
             ) : (
               <>
                 <CheckCircle2 className="w-5 h-5" />
-                Confirm & Generate Link
+                {t.confirmAndGenerate}
               </>
             )}
           </button>
 
-          {/* Back button */}
           <button
             onClick={handleReset}
-            className="w-full text-sm text-[#64748B] underline underline-offset-2 py-2"
+            className="w-full text-sm text-secondary-themed underline underline-offset-2 py-2 hover:text-primary-themed transition-colors"
           >
-            ← Start Over
+            {t.startOver}
           </button>
         </div>
       )}
 
       {/* ── SUCCESS: Share Link ───────────────────────── */}
       {state === "success" && (
-        <div className="w-full text-center">
-          <div className="w-16 h-16 bg-[#10B981] rounded-2xl flex items-center justify-center mx-auto mb-6">
+        <div className="w-full text-center pt-10">
+          <div className="w-16 h-16 bg-[#10B981] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-emerald-500/20">
             <CheckCircle2 className="w-8 h-8 text-white" />
           </div>
 
-          <h2 className="text-xl font-bold text-[#1E293B] mb-2">
-            Ready to Split!
+          <h2 className="text-2xl font-bold text-primary-themed mb-2">
+            {t.readyToSplit}
           </h2>
-          <p className="text-sm text-[#64748B] mb-6">
-            Share this link with your group. They can claim their items
-            and pay via DuitNow.
+          <p className="text-sm text-secondary-themed mb-8 px-4">
+            {t.shareLinkDesc}
           </p>
 
           {/* URL Display */}
-          <div className="bg-white rounded-2xl p-4 mb-4 border border-slate-100 shadow-sm">
-            <p className="text-xs text-[#64748B] uppercase tracking-wider font-semibold mb-2">
-              Share Link
+          <div className="bg-card-themed rounded-3xl p-5 mb-5 border border-themed shadow-card-themed relative">
+            <p className="text-xs text-secondary-themed uppercase tracking-wider font-semibold mb-3">
+              {t.shareLink}
             </p>
-            <p className="text-sm text-[#1E293B] font-mono break-all">
+            <p className="text-sm text-emerald-600 dark:text-emerald-400 font-mono break-all font-semibold select-all">
               {shareUrl}
             </p>
           </div>
@@ -840,70 +1048,69 @@ export default function HostUploadPage() {
           <button
             onClick={handleCopy}
             className="
-              w-full py-4 rounded-2xl bg-[#1E293B] text-white font-bold text-lg
+              w-full py-4 rounded-2xl bg-card-themed text-primary-themed border-2 border-themed font-bold text-lg
               flex items-center justify-center gap-2 transition-all duration-200
-              active:bg-slate-800 shadow-lg mb-4
+              hover:border-[#10B981] active:bg-elevated-themed shadow-card-themed mb-6
             "
           >
             <Copy className="w-5 h-5" />
-            {copied ? "Copied!" : "Copy Share Link"}
+            {copied ? t.copied : t.copyShareLink}
           </button>
 
           {/* Session ID for Merging */}
-          <div className="bg-white rounded-2xl p-4 mb-4 border border-slate-100 shadow-sm text-left">
-            <p className="text-xs text-[#64748B] uppercase tracking-wider font-semibold mb-2">
-              Session ID (for Merging)
+          <div className="bg-card-themed rounded-2xl p-4 mb-6 border border-themed shadow-card-themed text-left">
+            <p className="text-xs text-secondary-themed uppercase tracking-wider font-semibold mb-3">
+              {t.sessionIdForMerging}
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 bg-slate-50 px-3 py-2.5 rounded-xl text-sm font-mono text-[#1E293B] font-bold tracking-wider border border-slate-100">
+              <code className="flex-1 bg-elevated-themed px-4 py-3 rounded-xl text-sm font-mono text-primary-themed font-bold tracking-wider border border-themed text-center">
                 {sessionId}
               </code>
               <button
                 onClick={handleCopySessionId}
-                className="shrink-0 px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors flex items-center gap-1.5"
+                className="shrink-0 px-4 py-3 rounded-xl bg-elevated-themed text-secondary-themed text-sm font-semibold hover:text-primary-themed transition-colors border border-transparent hover:border-themed flex items-center justify-center"
               >
-                <Copy className="w-3.5 h-3.5" />
-                {copiedSessionId ? "Copied!" : "Copy ID"}
+                {copiedSessionId ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-xs text-[#64748B] mt-2 leading-relaxed">
-              Use this ID if you want to add another receipt to this bill later.
+            <p className="text-xs text-muted-themed mt-3 leading-relaxed">
+              {t.sessionIdNote}
             </p>
           </div>
 
           {/* Upload another */}
           <button
             onClick={handleReset}
-            className="text-sm text-[#64748B] underline underline-offset-2"
+            className="w-full text-sm text-secondary-themed underline underline-offset-2 py-3 hover:text-primary-themed transition-colors font-medium"
           >
-            Upload another receipt
+            {t.uploadAnother}
           </button>
         </div>
       )}
 
       {/* ── ERROR: Retry ──────────────────────────────── */}
       {state === "error" && (
-        <div className="w-full text-center">
-          <div className="w-16 h-16 bg-[#FC7C78] rounded-2xl flex items-center justify-center mx-auto mb-6">
+        <div className="w-full text-center pt-10">
+          <div className="w-16 h-16 bg-[#FC7C78] rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-red-500/20">
             <AlertCircle className="w-8 h-8 text-white" />
           </div>
 
-          <h2 className="text-xl font-bold text-[#1E293B] mb-2">
-            Couldn't parse receipt
+          <h2 className="text-2xl font-bold text-primary-themed mb-2">
+            {t.couldntParse}
           </h2>
-          <p className="text-sm text-[#FC7C78] mb-6">
+          <p className="text-sm text-[#FC7C78] mb-8 px-4 font-medium">
             {errorMsg}
           </p>
 
           <button
             onClick={handleReset}
             className="
-              w-full py-4 rounded-2xl bg-[#1E293B] text-white font-bold text-lg
+              w-full py-4 rounded-2xl bg-card-themed text-primary-themed border-2 border-themed font-bold text-lg
               flex items-center justify-center gap-2 transition-all duration-200
-              active:bg-slate-800 shadow-lg
+              hover:border-[#FC7C78] active:bg-elevated-themed shadow-card-themed
             "
           >
-            Try Another Photo
+            {t.tryAnotherPhoto}
           </button>
         </div>
       )}

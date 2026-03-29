@@ -166,6 +166,7 @@ export interface SessionData {
   userClaims: Array<Record<string, unknown>> | null;
   settlementHash: string | null;
   originalQrString: string;
+  sanitizedImageBase64?: string;
   [key: string]: unknown;
 }
 

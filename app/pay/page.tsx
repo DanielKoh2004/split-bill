@@ -5,6 +5,8 @@ import { ChevronLeft, Download, CheckCircle2, Copy, Info } from "lucide-react";
 import Link from "next/link";
 import { QRCodeCanvas } from "qrcode.react";
 import { modifyEMVCoPayload } from "@/src/duitnowQR";
+import { useAppContext } from "@/src/ThemeContext";
+import ToggleBar from "@/app/components/ToggleBar";
 
 interface PendingBill {
   sessionId: string;
@@ -14,6 +16,7 @@ interface PendingBill {
 }
 
 export default function GlobalPayPage() {
+  const { t } = useAppContext();
   const [bills, setBills] = useState<PendingBill[]>([]);
   const [mounted, setMounted] = useState(false);
   const [copiedAmount, setCopiedAmount] = useState<string | null>(null);
@@ -30,16 +33,10 @@ export default function GlobalPayPage() {
     }
   }, []);
 
-  // Fetch the latest claim data for every sessionId in the array
   useEffect(() => {
     if (!mounted || bills.length === 0) return;
-    
-    // As per instruction 4: Use Promise.all to fetch all session data in parallel to avoid waterfall
     Promise.all(bills.map(b => fetch(`/api/claim?sessionId=${b.sessionId}`)))
       .catch(console.error);
-      
-    // Note: Since Vercel KV /api/claim returns only the claims mapping, 
-    // we use the local calculated userTotal from the bookmark cache.
   }, [mounted, bills]);
 
   // Grouping Engine
@@ -52,7 +49,6 @@ export default function GlobalPayPage() {
         const existing = map.get(b.originalQrString);
         if (existing) {
             existing.merchantNames.push(b.merchantName);
-            // Deduplicate names
             existing.merchantNames = Array.from(new Set(existing.merchantNames));
             existing.sessionIds.push(b.sessionId);
             existing.hostTotal += b.userTotal;
@@ -101,31 +97,33 @@ export default function GlobalPayPage() {
   if (!mounted) return null;
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 relative pb-20">
+    <div className="max-w-md mx-auto min-h-screen bg-themed relative pb-20">
+      <ToggleBar />
+
       <header className="px-5 pt-8 pb-4 flex items-center gap-4">
-        <Link href="/" className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm text-slate-500 hover:text-slate-800">
+        <Link href="/" className="w-10 h-10 bg-card-themed rounded-full flex items-center justify-center shadow-card-themed text-secondary-themed hover:text-primary-themed border border-themed no-underline">
            <ChevronLeft className="w-5 h-5" />
         </Link>
         <div>
-          <h1 className="text-xl font-bold text-[#1E293B]">Pending Bills</h1>
-          <p className="text-sm text-[#64748B]">{bills.length} active sessions</p>
+          <h1 className="text-xl font-bold text-primary-themed">{t.viewAllPendingBills}</h1>
+          <p className="text-sm text-secondary-themed">{bills.length} active sessions</p>
         </div>
       </header>
 
       {groups.length === 0 ? (
-        <div className="px-5 mt-10 text-center text-slate-500">
-           <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-400 mb-3" />
-           <p className="font-semibold text-lg">All settled up!</p>
+        <div className="px-5 mt-10 text-center text-secondary-themed">
+           <CheckCircle2 className="w-12 h-12 mx-auto text-[#10B981] mb-3" />
+           <p className="font-semibold text-lg text-primary-themed">All settled up!</p>
            <p className="text-sm mt-1">You have no pending bills left to pay.</p>
         </div>
       ) : (
         <div className="px-5 space-y-6 mt-2">
             
           {/* Info Banner */}
-          <div className="bg-blue-50 p-3 rounded-xl mb-4 flex gap-3 items-start border border-blue-100">
+          <div className="bg-blue-500/10 p-3 rounded-xl mb-4 flex gap-3 items-start border border-blue-500/20">
             <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
-            <p className="text-sm text-blue-800 font-medium leading-snug">
-              Bank Security: Manual entry required. Tap the amount below to copy it for easy pasting.
+            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium leading-snug">
+              {t.bankSecurityNote}
             </p>
           </div>
 
@@ -134,12 +132,12 @@ export default function GlobalPayPage() {
               const groupId = `group-${idx}`;
 
               return (
-                  <div key={idx} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                  <div key={idx} className="bg-card-themed rounded-3xl p-6 shadow-card-themed border border-themed">
                       <div className="mb-4">
-                          <h2 className="text-lg font-bold text-slate-800">Payment Group</h2>
+                          <h2 className="text-lg font-bold text-primary-themed">Payment Group</h2>
                           <div className="space-y-1 mt-2">
                               {bills.filter(b => group.sessionIds.includes(b.sessionId)).map((b, i) => (
-                                  <div key={i} className="flex items-center text-sm font-medium text-slate-600 before:content-['•'] before:mr-2 before:text-slate-300">
+                                  <div key={i} className="flex items-center text-sm font-medium text-secondary-themed before:content-['•'] before:mr-2 before:text-muted-themed">
                                       {b.merchantName}: {formatRM(b.userTotal)}
                                   </div>
                               ))}
@@ -147,7 +145,7 @@ export default function GlobalPayPage() {
                       </div>
 
                       <div className="flex justify-center mb-6">
-                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                        <div className="bg-white p-5 rounded-2xl shadow-card-themed border border-themed">
                             <QRCodeCanvas
                             id={`qr-${groupId}`}
                             value={qrPayload}
@@ -159,18 +157,18 @@ export default function GlobalPayPage() {
                         </div>
                       </div>
 
-                      <div className="bg-slate-50 rounded-2xl p-4 mb-4">
+                      <div className="bg-elevated-themed rounded-2xl p-4 mb-4">
                         <div className="flex justify-between items-center">
-                            <span className="font-bold text-[#1E293B] text-sm">Host Grand Total</span>
+                            <span className="font-bold text-primary-themed text-sm">{t.totalToPay}</span>
                             <div className="flex items-center gap-2">
                                 {copiedAmount === groupId && (
                                 <span className="text-xs font-bold text-[#10B981] animate-[fadeIn_0.2s]">
-                                    Copied!
+                                    {t.copied}
                                 </span>
                                 )}
                                 <button
                                 onClick={() => copyAmount(group.hostTotal, groupId)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors active:bg-emerald-200"
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#10B981]/10 text-[#10B981] hover:bg-[#10B981]/20 transition-colors active:bg-[#10B981]/30"
                                 >
                                 <span className="text-xl font-bold">
                                     {formatRM(group.hostTotal)}
@@ -184,13 +182,13 @@ export default function GlobalPayPage() {
                       <div className="grid grid-cols-2 gap-3">
                          <button
                            onClick={() => downloadQR(groupId, "payment")}
-                           className="py-3 rounded-xl bg-slate-100 text-slate-700 font-semibold flex items-center justify-center gap-2 transition-all active:bg-slate-200 text-sm"
+                           className="py-3 rounded-xl bg-elevated-themed text-secondary-themed font-semibold flex items-center justify-center gap-2 transition-all hover:text-primary-themed text-sm"
                          >
-                            <Download className="w-4 h-4" /> Save QR
+                            <Download className="w-4 h-4" /> {t.saveQrToGallery}
                          </button>
                          <button
                            onClick={() => markAsPaid(group.originalQrString, group.sessionIds)}
-                           className="py-3 rounded-xl bg-[#1E293B] text-white font-semibold flex items-center justify-center gap-2 transition-all active:bg-slate-800 text-sm"
+                           className="py-3 rounded-xl bg-[#10B981] text-white font-semibold flex items-center justify-center gap-2 transition-all active:bg-emerald-600 text-sm"
                          >
                             <CheckCircle2 className="w-4 h-4" /> Mark as Paid
                          </button>

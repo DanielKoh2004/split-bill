@@ -21,9 +21,26 @@ export interface Receipt {
   grandTotalInCents: number;
 }
 
+/** Exclusive claim: one user takes full ownership of one unit of an item. */
 export interface UserClaim {
   userId: string;
   itemId: string;
+}
+
+/**
+ * Fractional claim: multiple users share ownership of one item unit.
+ * Each sharer gets price / totalSharers, with remainder distributed round-robin.
+ */
+export interface FractionalClaim {
+  userId: string;
+  itemId: string;
+  shares: number;       // always 1 for now (could support 2/N in future)
+  totalSharers: number; // capped at 10
+}
+
+/** Type guard for FractionalClaim */
+function isFractional(claim: UserClaim | FractionalClaim): claim is FractionalClaim {
+  return "totalSharers" in claim && (claim as FractionalClaim).totalSharers > 0;
 }
 
 // ── Custom Error ────────────────────────────────────────────
@@ -109,6 +126,10 @@ function distributeProportionally(
 
 /**
  * Calculates the exact split for a receipt given user claims.
+ * 
+ * Supports two claim types:
+ * - `UserClaim`: exclusive ownership — each claim is 1 unit of the item
+ * - `FractionalClaim`: joint ownership — price divided by totalSharers
  *
  * @returns A record mapping userId → total amount owed in cents/sen.
  * @throws {ReconciliationError} if the receipt totals are inconsistent or
@@ -116,7 +137,7 @@ function distributeProportionally(
  */
 export function calculateSplit(
   receipt: Receipt,
-  claims: UserClaim[],
+  claims: (UserClaim | FractionalClaim)[],
 ): Record<string, number> {
   // ── Input Validation ──────────────────────────────────────
   const expectedGrand =
@@ -128,17 +149,7 @@ export function calculateSplit(
     throw new ReconciliationError(receipt.grandTotalInCents, expectedGrand);
   }
 
-  // ── Step A: Compute item subtotals per user ───────────────
-  // Group claims by itemId
-  const itemClaimants = new Map<string, string[]>();
-  for (const claim of claims) {
-    if (!itemClaimants.has(claim.itemId)) {
-      itemClaimants.set(claim.itemId, []);
-    }
-    itemClaimants.get(claim.itemId)!.push(claim.userId);
-  }
-
-  // Build a price lookup from the receipt
+  // ── Build a price lookup from the receipt ─────────────────
   const itemPrices = new Map<string, number>();
   for (const item of receipt.items) {
     itemPrices.set(item.id, item.priceInCents);
@@ -155,8 +166,31 @@ export function calculateSplit(
     userSubtotals.set(uid, 0);
   }
 
-  // ── Step A + B: Integer division + penny distribution ─────
-  for (const [itemId, claimantIds] of itemClaimants) {
+  // ── Step A: Separate claims into exclusive and fractional ─
+  // Group exclusive claims by itemId
+  const exclusiveClaimants = new Map<string, string[]>();
+  // Group fractional claims by itemId
+  const fractionalClaimants = new Map<string, { userId: string; totalSharers: number }[]>();
+
+  for (const claim of claims) {
+    if (isFractional(claim)) {
+      if (!fractionalClaimants.has(claim.itemId)) {
+        fractionalClaimants.set(claim.itemId, []);
+      }
+      fractionalClaimants.get(claim.itemId)!.push({
+        userId: claim.userId,
+        totalSharers: claim.totalSharers,
+      });
+    } else {
+      if (!exclusiveClaimants.has(claim.itemId)) {
+        exclusiveClaimants.set(claim.itemId, []);
+      }
+      exclusiveClaimants.get(claim.itemId)!.push(claim.userId);
+    }
+  }
+
+  // ── Step B: Process exclusive claims (unchanged logic) ────
+  for (const [itemId, claimantIds] of exclusiveClaimants) {
     const price = itemPrices.get(itemId);
     if (price === undefined) {
       throw new Error(`Item "${itemId}" not found in receipt items`);
@@ -166,15 +200,43 @@ export function calculateSplit(
     const baseShare = Math.floor(price / numClaimants);
     const remainder = price % numClaimants;
 
-    // Give everyone the base share
     for (const uid of claimantIds) {
       userSubtotals.set(uid, (userSubtotals.get(uid) ?? 0) + baseShare);
     }
 
-    // Distribute remainder cents round-robin sorted by highest subtotal desc,
-    // userId as tie-breaker
     if (remainder > 0) {
       const sorted = [...claimantIds].sort(
+        subtotalDescComparator(userSubtotals),
+      );
+      for (let i = 0; i < remainder; i++) {
+        const uid = sorted[i % sorted.length];
+        userSubtotals.set(uid, (userSubtotals.get(uid) ?? 0) + 1);
+      }
+    }
+  }
+
+  // ── Step C: Process fractional claims ─────────────────────
+  for (const [itemId, sharers] of fractionalClaimants) {
+    const price = itemPrices.get(itemId);
+    if (price === undefined) {
+      throw new Error(`Item "${itemId}" not found in receipt items`);
+    }
+
+    // All sharers of the same item should have the same totalSharers,
+    // but we use the first one's value as the canonical count.
+    const totalSharers = sharers[0].totalSharers;
+    const baseShare = Math.floor(price / totalSharers);
+    const remainder = price % totalSharers;
+
+    // Give each sharer the base share
+    const sharerUserIds = sharers.map((s) => s.userId);
+    for (const uid of sharerUserIds) {
+      userSubtotals.set(uid, (userSubtotals.get(uid) ?? 0) + baseShare);
+    }
+
+    // Distribute remainder cents round-robin
+    if (remainder > 0) {
+      const sorted = [...sharerUserIds].sort(
         subtotalDescComparator(userSubtotals),
       );
       for (let i = 0; i < remainder; i++) {
@@ -193,7 +255,7 @@ export function calculateSplit(
     throw new ReconciliationError(receipt.subtotalInCents, computedSubtotal);
   }
 
-  // ── Step C: Proportional tax & service charge ─────────────
+  // ── Step D: Proportional tax & service charge ─────────────
   const userIdList = [...allUserIds];
 
   const taxShares = distributeProportionally(
@@ -217,7 +279,7 @@ export function calculateSplit(
       (serviceShares.get(uid) ?? 0);
   }
 
-  // ── Step D: Reconciliation ────────────────────────────────
+  // ── Step E: Reconciliation ────────────────────────────────
   const finalSum = Object.values(result).reduce((a, b) => a + b, 0);
   if (finalSum !== receipt.grandTotalInCents) {
     throw new ReconciliationError(receipt.grandTotalInCents, finalSum);

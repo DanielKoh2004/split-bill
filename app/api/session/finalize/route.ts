@@ -48,11 +48,20 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { receipt, originalQrString, mergeSessionId } = body as {
+    const { receipt, originalQrString, mergeSessionId, imageBase64 } = body as {
       receipt?: Record<string, unknown>;
       originalQrString?: string;
       mergeSessionId?: string;
+      imageBase64?: string;
     };
+
+    // Validate optional receipt image (500KB cap)
+    if (imageBase64 && (typeof imageBase64 !== "string" || imageBase64.length > 512_000)) {
+      return NextResponse.json(
+        { error: "Receipt image too large. Maximum 500KB." },
+        { status: 400 },
+      );
+    }
 
     // ── Validation ────────────────────────────────────────
     if (!receipt || typeof receipt !== "object") {
@@ -125,6 +134,7 @@ export async function POST(request: NextRequest) {
         userClaims: [],
         settlementHash: null,
         originalQrString,
+        ...(imageBase64 ? { sanitizedImageBase64: imageBase64 } : {}),
       };
     }
 
