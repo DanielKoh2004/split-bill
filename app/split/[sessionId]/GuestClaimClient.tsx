@@ -30,6 +30,7 @@ export interface ReceiptItemDisplay {
   name: string;
   quantity: number;
   priceInCents: number;
+  sectionName?: string;
 }
 
 export interface GuestClaimReceipt {
@@ -47,6 +48,19 @@ export interface GuestClaimReceipt {
 // ═══════════════════════════════════════════════════════════
 
 const POLL_INTERVAL_MS = 3000;
+
+/** Groups items by sectionName. Items without a section go into "General". */
+function groupItemsBySection(items: ReceiptItemDisplay[]): Map<string, ReceiptItemDisplay[]> {
+  const groups = new Map<string, ReceiptItemDisplay[]>();
+  for (const item of items) {
+    const section = item.sectionName || "General";
+    if (!groups.has(section)) {
+      groups.set(section, []);
+    }
+    groups.get(section)!.push(item);
+  }
+  return groups;
+}
 
 function formatRM(cents: number): string {
   return `RM ${(cents / 100).toFixed(2)}`;
@@ -450,119 +464,131 @@ export default function GuestClaimClient({
         </div>
       </div>
 
-      {/* ── Item Cards ──────────────────────────────────── */}
+      {/* ── Item Cards (Grouped by Section) ────────────── */}
       <div className="px-5 space-y-3">
         <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
           Select Your Items
         </span>
 
-        {items.map((item) => {
-          const claimed = claims[item.id] ?? 0;
-          const othersQty = othersTotals[item.id] ?? 0;
-          const remaining = item.quantity - claimed - othersQty;
-          const isSingle = item.quantity === 1;
-          const isSelected = claimed > 0;
-          const isTakenByOthers = isSingle && othersQty >= 1 && claimed === 0;
-
-          return (
-            <div
-              key={item.id}
-              className={`
-                bg-white rounded-2xl p-4 shadow-sm border-2 transition-all duration-200
-                ${isSelected
-                  ? "border-[#10B981] shadow-[0_0_0_1px_rgba(16,185,129,0.1)]"
-                  : isTakenByOthers
-                  ? "border-transparent opacity-50"
-                  : "border-transparent"
-                }
-              `}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex-1 min-w-0 mr-4">
-                  <p className="font-semibold text-[#1E293B] truncate">
-                    {item.name}
-                  </p>
-                  <p className="text-sm text-[#64748B] mt-0.5">
-                    {formatRM(item.priceInCents)}
-                    {item.quantity > 1 && (
-                      <span className="ml-1">
-                        · {remaining} of {item.quantity} available
-                      </span>
-                    )}
-                    {isTakenByOthers && (
-                      <span className="ml-1 text-amber-600">· Claimed</span>
-                    )}
-                  </p>
-                </div>
-
-                {isSingle ? (
-                  <button
-                    onClick={() => toggleSingleItem(item.id)}
-                    disabled={isTakenByOthers}
-                    className={`
-                      w-8 h-8 rounded-full border-2 flex items-center justify-center
-                      transition-all duration-200 shrink-0
-                      ${isSelected
-                        ? "bg-[#10B981] border-[#10B981]"
-                        : isTakenByOthers
-                        ? "border-slate-200 bg-slate-100 cursor-not-allowed"
-                        : "border-[#64748B] bg-transparent"
-                      }
-                    `}
-                    aria-label={`Toggle ${item.name}`}
-                  >
-                    {isSelected && (
-                      <Check className="w-4 h-4 text-white" strokeWidth={3} />
-                    )}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3 shrink-0">
-                    <button
-                      onClick={() => adjustClaim(item.id, item.quantity, -1)}
-                      disabled={claimed === 0}
-                      className={`
-                        w-8 h-8 rounded-full flex items-center justify-center
-                        border-2 transition-all duration-200
-                        ${claimed === 0
-                          ? "border-slate-200 text-slate-300 cursor-not-allowed"
-                          : "border-[#FC7C78] text-[#FC7C78] active:bg-red-50"
-                        }
-                      `}
-                      aria-label={`Remove one ${item.name}`}
-                    >
-                      <Minus className="w-4 h-4" strokeWidth={3} />
-                    </button>
-
-                    <span
-                      className={`
-                        w-6 text-center font-bold text-lg
-                        ${claimed > 0 ? "text-[#1E293B]" : "text-slate-300"}
-                      `}
-                    >
-                      {claimed}
-                    </span>
-
-                    <button
-                      onClick={() => adjustClaim(item.id, item.quantity, +1)}
-                      disabled={remaining <= 0}
-                      className={`
-                        w-8 h-8 rounded-full flex items-center justify-center
-                        border-2 transition-all duration-200
-                        ${remaining <= 0
-                          ? "border-slate-200 text-slate-300 cursor-not-allowed"
-                          : "border-[#10B981] text-[#10B981] active:bg-emerald-50"
-                        }
-                      `}
-                      aria-label={`Add one ${item.name}`}
-                    >
-                      <Plus className="w-4 h-4" strokeWidth={3} />
-                    </button>
-                  </div>
-                )}
-              </div>
+        {Array.from(groupItemsBySection(items)).map(([sectionLabel, sectionItems]) => (
+          <div key={sectionLabel} className="space-y-2">
+            {/* Section Header */}
+            <div className="flex items-center gap-2 pt-3 pb-1">
+              <span className="text-xs font-bold text-[#1E293B] uppercase tracking-wider bg-slate-100 px-3 py-1.5 rounded-lg">
+                🍽 {sectionLabel}
+              </span>
+              <div className="flex-1 border-t border-slate-200" />
             </div>
-          );
-        })}
+
+            {sectionItems.map((item) => {
+              const claimed = claims[item.id] ?? 0;
+              const othersQty = othersTotals[item.id] ?? 0;
+              const remaining = item.quantity - claimed - othersQty;
+              const isSingle = item.quantity === 1;
+              const isSelected = claimed > 0;
+              const isTakenByOthers = isSingle && othersQty >= 1 && claimed === 0;
+
+              return (
+                <div
+                  key={item.id}
+                  className={`
+                    bg-white rounded-2xl p-4 shadow-sm border-2 transition-all duration-200
+                    ${isSelected
+                      ? "border-[#10B981] shadow-[0_0_0_1px_rgba(16,185,129,0.1)]"
+                      : isTakenByOthers
+                      ? "border-transparent opacity-50"
+                      : "border-transparent"
+                    }
+                  `}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1 min-w-0 mr-4">
+                      <p className="font-semibold text-[#1E293B] truncate">
+                        {item.name}
+                      </p>
+                      <p className="text-sm text-[#64748B] mt-0.5">
+                        {formatRM(item.priceInCents)}
+                        {item.quantity > 1 && (
+                          <span className="ml-1">
+                            · {remaining} of {item.quantity} available
+                          </span>
+                        )}
+                        {isTakenByOthers && (
+                          <span className="ml-1 text-amber-600">· Claimed</span>
+                        )}
+                      </p>
+                    </div>
+
+                    {isSingle ? (
+                      <button
+                        onClick={() => toggleSingleItem(item.id)}
+                        disabled={isTakenByOthers}
+                        className={`
+                          w-8 h-8 rounded-full border-2 flex items-center justify-center
+                          transition-all duration-200 shrink-0
+                          ${isSelected
+                            ? "bg-[#10B981] border-[#10B981]"
+                            : isTakenByOthers
+                            ? "border-slate-200 bg-slate-100 cursor-not-allowed"
+                            : "border-[#64748B] bg-transparent"
+                          }
+                        `}
+                        aria-label={`Toggle ${item.name}`}
+                      >
+                        {isSelected && (
+                          <Check className="w-4 h-4 text-white" strokeWidth={3} />
+                        )}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-3 shrink-0">
+                        <button
+                          onClick={() => adjustClaim(item.id, item.quantity, -1)}
+                          disabled={claimed === 0}
+                          className={`
+                            w-8 h-8 rounded-full flex items-center justify-center
+                            border-2 transition-all duration-200
+                            ${claimed === 0
+                              ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                              : "border-[#FC7C78] text-[#FC7C78] active:bg-red-50"
+                            }
+                          `}
+                          aria-label={`Remove one ${item.name}`}
+                        >
+                          <Minus className="w-4 h-4" strokeWidth={3} />
+                        </button>
+
+                        <span
+                          className={`
+                            w-6 text-center font-bold text-lg
+                            ${claimed > 0 ? "text-[#1E293B]" : "text-slate-300"}
+                          `}
+                        >
+                          {claimed}
+                        </span>
+
+                        <button
+                          onClick={() => adjustClaim(item.id, item.quantity, +1)}
+                          disabled={remaining <= 0}
+                          className={`
+                            w-8 h-8 rounded-full flex items-center justify-center
+                            border-2 transition-all duration-200
+                            ${remaining <= 0
+                              ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                              : "border-[#10B981] text-[#10B981] active:bg-emerald-50"
+                            }
+                          `}
+                          aria-label={`Add one ${item.name}`}
+                        >
+                          <Plus className="w-4 h-4" strokeWidth={3} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
       </div>
 
       {/* ── Sticky Footer ───────────────────────────────── */}

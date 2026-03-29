@@ -10,6 +10,7 @@ export interface ReceiptItem {
   id: string;
   name: string;
   priceInCents: number; // integer, e.g. RM 15.50 → 1550
+  sectionName?: string; // Trip Mode: categorize items by receipt/section
 }
 
 export interface Receipt {

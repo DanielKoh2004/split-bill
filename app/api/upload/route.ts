@@ -4,12 +4,17 @@ import {
   parseReceiptImage,
   MathReconciliationError,
 } from "@/src/receiptParser";
-import { getSession, registerSession, type SessionData } from "@/src/privacy";
 import { rateLimit } from "@/src/rateLimit";
 
 // ─────────────────────────────────────────────────────────────
+// Phase 1: Upload → Parse → Return Draft
+//
+// The upload route now ONLY parses the receipt via AI and
+// returns the enriched JSON to the client for review.
+// NO data is written to Redis/KV at this stage.
+//
 // constraints.md compliance:
-//   ✅ Stateless — in-memory session, no database
+//   ✅ Stateless — no data persisted
 //   ✅ Zero-knowledge — raw image never stored
 //   ✅ Integer-only — all math via parseReceiptImage pipeline
 //   ✅ Fail loudly — MathReconciliationError / ZodError → 400
@@ -18,18 +23,6 @@ import { rateLimit } from "@/src/rateLimit";
 
 /** Max base64 payload size (~7.5 MB decoded). */
 const MAX_BASE64_LENGTH = 10 * 1024 * 1024;
-
-/** Generate a short random alphanumeric session ID. */
-function generateSessionId(length = 12): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-  let id = "";
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  for (let i = 0; i < length; i++) {
-    id += chars[bytes[i] % chars.length];
-  }
-  return id;
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -51,22 +44,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { imageBase64, originalQrString, mergeSessionId } = body as { 
-      imageBase64?: string; 
-      originalQrString?: string;
-      mergeSessionId?: string;
+    const { imageBase64, sectionName } = body as {
+      imageBase64?: string;
+      sectionName?: string;
     };
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid imageBase64 field." },
-        { status: 400 },
-      );
-    }
-
-    if (!originalQrString || typeof originalQrString !== "string") {
-      return NextResponse.json(
-        { error: "Missing or invalid DuitNow original QR string." },
         { status: 400 },
       );
     }
@@ -102,55 +87,20 @@ export async function POST(request: NextRequest) {
       model: "gemini-2.5-flash",
     });
 
-    // 4. Enrich items with stable IDs (ParsedReceipt has no id field)
+    // 4. Enrich items with stable IDs and optional sectionName
+    const section = sectionName?.trim() || undefined;
     const enrichedReceipt = {
       ...parsedReceipt,
-      items: parsedReceipt.items.map((item, idx) => ({
+      items: parsedReceipt.items.map((item) => ({
         ...item,
         id: `item-${crypto.randomUUID()}`,
+        ...(section ? { sectionName: section } : {}),
       })),
     };
 
-    let sessionId = mergeSessionId || generateSessionId();
-    let sessionData: SessionData;
-
-    if (mergeSessionId) {
-      const existing = await getSession(mergeSessionId);
-      if (!existing || !existing.receiptJson) {
-        return NextResponse.json(
-          { error: "Invalid mergeSessionId. Session not found or expired." },
-          { status: 400 },
-        );
-      }
-
-      // Merge math logic
-      const existingReceipt = existing.receiptJson as any;
-      const combinedReceipt = {
-        ...existingReceipt,
-        subtotalInCents: existingReceipt.subtotalInCents + enrichedReceipt.subtotalInCents,
-        taxInCents: existingReceipt.taxInCents + enrichedReceipt.taxInCents,
-        serviceChargeInCents: existingReceipt.serviceChargeInCents + enrichedReceipt.serviceChargeInCents,
-        grandTotalInCents: existingReceipt.grandTotalInCents + enrichedReceipt.grandTotalInCents,
-        items: [...existingReceipt.items, ...enrichedReceipt.items],
-      };
-
-      sessionData = {
-        ...existing,
-        receiptJson: combinedReceipt as Record<string, unknown>,
-      };
-    } else {
-      sessionData = {
-        receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
-        userClaims: [],
-        settlementHash: null,
-        originalQrString,
-      };
-    }
-
-    await registerSession(sessionId, sessionData);
-
-    // 7. Return session ID — the raw image is already gone from memory
-    return NextResponse.json({ sessionId }, { status: 200 });
+    // 5. Return the enriched receipt for client-side review
+    //    NO session is created — the client must call /api/session/finalize
+    return NextResponse.json({ enrichedReceipt }, { status: 200 });
   } catch (error) {
     // ── Fail Loudly: specific error types ────────────────
     if (error instanceof MathReconciliationError) {
