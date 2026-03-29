@@ -9,8 +9,8 @@
 // Constraints: No external crypto libs. Use native APIs only.
 // ─────────────────────────────────────────────────────────────
 
-// No imports — uses native Web Crypto API (crypto.subtle)
-
+// Uses native Web Crypto API + Vercel KV
+import { kv } from "@vercel/kv";
 // ═════════════════════════════════════════════════════════════
 // Feature A: Client-Side Image Sanitization (Browser API)
 // ═════════════════════════════════════════════════════════════
@@ -168,47 +168,29 @@ export interface SessionData {
   [key: string]: unknown;
 }
 
-const sessionStore = new Map<string, SessionData>();
-
 /**
  * Registers a session with raw financial data.
  * Call this when the receipt is first parsed.
+ * EX: 7200 sets a 2-hour zero-knowledge self-destruct.
  */
-export function registerSession(
+export async function registerSession(
   sessionId: string,
   data: SessionData,
-): void {
-  sessionStore.set(sessionId, data);
+): Promise<void> {
+  await kv.set(sessionId, data, { ex: 7200 });
 }
 
 /**
- * Retrieves session data (returns undefined if wiped or never set).
+ * Retrieves session data (returns undefined/null if wiped or never set).
  */
-export function getSession(sessionId: string): SessionData | undefined {
-  return sessionStore.get(sessionId);
+export async function getSession(sessionId: string): Promise<SessionData | null> {
+  return await kv.get<SessionData>(sessionId);
 }
 
 /**
  * Ephemeral teardown — removes all references to financial data.
- *
- * In V8, JS strings are immutable — you cannot overwrite their memory
- * addresses. The only honest approach is to delete all references so
- * the garbage collector can reclaim the memory.
- *
- * This function:
- *   1. Deletes the session from the module-scoped store.
- *   2. Returns true if a session was found and deleted, false otherwise.
- *
- * Callers should also drop any local references to the session data
- * (set variables to null) to ensure no strong references remain.
  */
-export function wipeSession(sessionId: string): boolean {
-  return sessionStore.delete(sessionId);
-}
-
-/**
- * Returns the number of active sessions (for diagnostics only).
- */
-export function activeSessionCount(): number {
-  return sessionStore.size;
+export async function wipeSession(sessionId: string): Promise<boolean> {
+  const deleted = await kv.del(sessionId);
+  return deleted > 0;
 }

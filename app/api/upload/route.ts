@@ -58,13 +58,13 @@ export async function POST(request: NextRequest) {
     // 4. Generate ephemeral session ID
     const sessionId = generateSessionId();
 
-    // 5. Register in-memory session (NO database — constraints.md mandate)
+    // 5. Register session in Vercel KV (constraints.md mandate: 2-hour TTL)
     const sessionData: SessionData = {
       receiptJson: parsedReceipt as unknown as Record<string, unknown>,
       userClaims: [],
       settlementHash: null,
     };
-    registerSession(sessionId, sessionData);
+    await registerSession(sessionId, sessionData);
 
     // 6. Return session ID — the raw image is already gone from memory
     return NextResponse.json({ sessionId }, { status: 200 });

@@ -1,9 +1,11 @@
 import { getSession } from "@/src/privacy";
 import GuestClaimClient from "./GuestClaimClient";
 
+export const dynamic = "force-dynamic";
+
 // ─────────────────────────────────────────────────────────────
-// Server Component — fetches session from server memory
-// constraints.md: stateless, zero-knowledge, no database
+// Server Component — fetches session from Vercel KV
+// constraints.md: stateless, zero-knowledge, no relational database
 // ─────────────────────────────────────────────────────────────
 
 export default async function SplitPage({
@@ -12,7 +14,7 @@ export default async function SplitPage({
   params: Promise<{ sessionId: string }>;
 }) {
   const { sessionId } = await params;
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
 
   // ── Kill Switch: Session Expired ──────────────────────
   if (!session || !session.receiptJson) {
