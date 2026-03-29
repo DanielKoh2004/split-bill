@@ -1,0 +1,205 @@
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import { ChevronLeft, Download, CheckCircle2, Copy, Info } from "lucide-react";
+import Link from "next/link";
+import { QRCodeCanvas } from "qrcode.react";
+import { modifyEMVCoPayload } from "@/src/duitnowQR";
+
+interface PendingBill {
+  sessionId: string;
+  merchantName: string;
+  originalQrString: string;
+  userTotal: number;
+}
+
+export default function GlobalPayPage() {
+  const [bills, setBills] = useState<PendingBill[]>([]);
+  const [mounted, setMounted] = useState(false);
+  const [copiedAmount, setCopiedAmount] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    const stored = localStorage.getItem("pending_bills");
+    if (stored) {
+      try {
+        setBills(JSON.parse(stored));
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
+
+  // Fetch the latest claim data for every sessionId in the array
+  useEffect(() => {
+    if (!mounted || bills.length === 0) return;
+    
+    // As per instruction 4: Use Promise.all to fetch all session data in parallel to avoid waterfall
+    Promise.all(bills.map(b => fetch(`/api/claim?sessionId=${b.sessionId}`)))
+      .catch(console.error);
+      
+    // Note: Since Vercel KV /api/claim returns only the claims mapping, 
+    // we use the local calculated userTotal from the bookmark cache.
+  }, [mounted, bills]);
+
+  // Grouping Engine
+  const groups = useMemo(() => {
+    const map = new Map<string, { merchantNames: string[]; sessionIds: string[]; hostTotal: number; originalQrString: string }>();
+
+    for (const b of bills) {
+        if (b.userTotal <= 0) continue;
+        
+        const existing = map.get(b.originalQrString);
+        if (existing) {
+            existing.merchantNames.push(b.merchantName);
+            // Deduplicate names
+            existing.merchantNames = Array.from(new Set(existing.merchantNames));
+            existing.sessionIds.push(b.sessionId);
+            existing.hostTotal += b.userTotal;
+        } else {
+            map.set(b.originalQrString, {
+                originalQrString: b.originalQrString,
+                merchantNames: [b.merchantName],
+                sessionIds: [b.sessionId],
+                hostTotal: b.userTotal
+            });
+        }
+    }
+    return Array.from(map.values());
+  }, [bills]);
+
+  const markAsPaid = (originalQrString: string, sessionIds: string[]) => {
+      const remaining = bills.filter(b => !sessionIds.includes(b.sessionId));
+      setBills(remaining);
+      localStorage.setItem("pending_bills", JSON.stringify(remaining));
+  };
+
+  const copyAmount = async (amount: number, id: string) => {
+      try {
+          await navigator.clipboard.writeText((amount / 100).toFixed(2));
+          setCopiedAmount(id);
+          setTimeout(() => setCopiedAmount(null), 2000);
+      } catch {}
+  };
+
+  const downloadQR = (id: string, name: string) => {
+    const canvas = document.getElementById(`qr-${id}`) as HTMLCanvasElement;
+    if (!canvas) return;
+    const pngUrl = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
+    const downloadLink = document.createElement("a");
+    downloadLink.href = pngUrl;
+    downloadLink.download = `splitbill-${name}.png`;
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+  };
+
+  function formatRM(cents: number) {
+    return `RM ${(cents / 100).toFixed(2)}`;
+  }
+
+  if (!mounted) return null;
+
+  return (
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 relative pb-20">
+      <header className="px-5 pt-8 pb-4 flex items-center gap-4">
+        <Link href="/" className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm text-slate-500 hover:text-slate-800">
+           <ChevronLeft className="w-5 h-5" />
+        </Link>
+        <div>
+          <h1 className="text-xl font-bold text-[#1E293B]">Pending Bills</h1>
+          <p className="text-sm text-[#64748B]">{bills.length} active sessions</p>
+        </div>
+      </header>
+
+      {groups.length === 0 ? (
+        <div className="px-5 mt-10 text-center text-slate-500">
+           <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-400 mb-3" />
+           <p className="font-semibold text-lg">All settled up!</p>
+           <p className="text-sm mt-1">You have no pending bills left to pay.</p>
+        </div>
+      ) : (
+        <div className="px-5 space-y-6 mt-2">
+            
+          {/* Info Banner */}
+          <div className="bg-blue-50 p-3 rounded-xl mb-4 flex gap-3 items-start border border-blue-100">
+            <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-800 font-medium leading-snug">
+              Bank Security: Manual entry required. Tap the amount below to copy it for easy pasting.
+            </p>
+          </div>
+
+          {groups.map((group, idx) => {
+              const qrPayload = modifyEMVCoPayload(group.originalQrString, group.hostTotal);
+              const groupId = `group-${idx}`;
+
+              return (
+                  <div key={idx} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                      <div className="mb-4">
+                          <h2 className="text-lg font-bold text-slate-800">Payment Group</h2>
+                          <div className="space-y-1 mt-2">
+                              {bills.filter(b => group.sessionIds.includes(b.sessionId)).map((b, i) => (
+                                  <div key={i} className="flex items-center text-sm font-medium text-slate-600 before:content-['•'] before:mr-2 before:text-slate-300">
+                                      {b.merchantName}: {formatRM(b.userTotal)}
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+
+                      <div className="flex justify-center mb-6">
+                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                            <QRCodeCanvas
+                            id={`qr-${groupId}`}
+                            value={qrPayload}
+                            size={200}
+                            level="M"
+                            bgColor="#FFFFFF"
+                            fgColor="#1E293B"
+                            />
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-2xl p-4 mb-4">
+                        <div className="flex justify-between items-center">
+                            <span className="font-bold text-[#1E293B] text-sm">Host Grand Total</span>
+                            <div className="flex items-center gap-2">
+                                {copiedAmount === groupId && (
+                                <span className="text-xs font-bold text-[#10B981] animate-[fadeIn_0.2s]">
+                                    Copied!
+                                </span>
+                                )}
+                                <button
+                                onClick={() => copyAmount(group.hostTotal, groupId)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors active:bg-emerald-200"
+                                >
+                                <span className="text-xl font-bold">
+                                    {formatRM(group.hostTotal)}
+                                </span>
+                                <Copy className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                         <button
+                           onClick={() => downloadQR(groupId, "payment")}
+                           className="py-3 rounded-xl bg-slate-100 text-slate-700 font-semibold flex items-center justify-center gap-2 transition-all active:bg-slate-200 text-sm"
+                         >
+                            <Download className="w-4 h-4" /> Save QR
+                         </button>
+                         <button
+                           onClick={() => markAsPaid(group.originalQrString, group.sessionIds)}
+                           className="py-3 rounded-xl bg-[#1E293B] text-white font-semibold flex items-center justify-center gap-2 transition-all active:bg-slate-800 text-sm"
+                         >
+                            <CheckCircle2 className="w-4 h-4" /> Mark as Paid
+                         </button>
+                      </div>
+                  </div>
+              );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -11,7 +11,11 @@ import {
   X,
   Receipt,
   AlertTriangle,
+  Copy,
+  Info,
+  CreditCard
 } from "lucide-react";
+import Link from "next/link";
 import { QRCodeCanvas } from "qrcode.react";
 import { calculateSplit } from "@/src/mathEngine";
 import { modifyEMVCoPayload } from "@/src/duitnowQR";
@@ -97,6 +101,8 @@ export default function GuestClaimClient({
   const [othersTotals, setOthersTotals] = useState<Record<string, number>>({});
   const [showModal, setShowModal] = useState(false);
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
+  const [copiedAmount, setCopiedAmount] = useState(false);
+  const [copiedProof, setCopiedProof] = useState(false);
 
   const pendingSyncsRef = useRef(0);
 
@@ -300,7 +306,7 @@ export default function GuestClaimClient({
 
   const hasItems = Object.keys(claims).length > 0;
 
-  // ── Download QR Handler ───────────────────────────────
+  // ── Download QR & Copy Handlers ───────────────────────
   const downloadQR = () => {
     const canvas = document.getElementById("duitnow-qr") as HTMLCanvasElement;
     if (!canvas) return;
@@ -318,6 +324,60 @@ export default function GuestClaimClient({
     downloadLink.click();
     document.body.removeChild(downloadLink);
   };
+
+  const copyAmount = useCallback(async () => {
+    try {
+      const amountStr = (userTotal / 100).toFixed(2);
+      await navigator.clipboard.writeText(amountStr);
+      setCopiedAmount(true);
+      setTimeout(() => setCopiedAmount(false), 2000);
+    } catch {
+      // ignore
+    }
+  }, [userTotal]);
+
+  const copyProof = useCallback(async () => {
+    try {
+      const activeItems = items.filter((i) => claims[i.id] > 0);
+      const itemsList = activeItems.map((i) => `${i.name} (${claims[i.id]}x)`).join(", ");
+      const text = `SplitBill Settlement: Paying RM ${(userTotal / 100).toFixed(2)} for ${itemsList} via DuitNow.`;
+      await navigator.clipboard.writeText(text);
+      setCopiedProof(true);
+      setTimeout(() => setCopiedProof(false), 2000);
+    } catch {
+      // ignore
+    }
+  }, [userTotal, claims, items]);
+
+  // ── Bookmarking Pending Bills ─────────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const existingStr = localStorage.getItem("pending_bills");
+      let bills: Array<{ sessionId: string; merchantName: string; originalQrString: string; userTotal: number }> = [];
+      if (existingStr) {
+        bills = JSON.parse(existingStr);
+      }
+
+      const existingIdx = bills.findIndex((b) => b.sessionId === sessionId);
+      if (userTotal > 0) {
+        const payload = {
+          sessionId,
+          merchantName: receipt.merchantName,
+          originalQrString,
+          userTotal,
+        };
+        if (existingIdx !== -1) bills[existingIdx] = payload;
+        else bills.push(payload);
+      } else {
+        if (existingIdx !== -1) bills.splice(existingIdx, 1);
+      }
+
+      localStorage.setItem("pending_bills", JSON.stringify(bills));
+    } catch {
+      // ignore
+    }
+  }, [sessionId, receipt.merchantName, originalQrString, userTotal]);
 
   // ═══════════════════════════════════════════════════════
   // Render
@@ -519,7 +579,7 @@ export default function GuestClaimClient({
           disabled={!hasItems || userTotal <= 0}
           className={`
             w-full py-4 rounded-2xl text-white font-bold text-lg
-            transition-all duration-200 flex items-center justify-center gap-2
+            transition-all duration-200 flex items-center justify-center gap-2 mb-3
             ${hasItems && userTotal > 0
               ? "bg-[#10B981] active:bg-emerald-600 shadow-lg shadow-emerald-200"
               : "bg-slate-300 cursor-not-allowed"
@@ -529,6 +589,14 @@ export default function GuestClaimClient({
           <QrCode className="w-5 h-5" />
           Pay {formatRM(userTotal)}
         </button>
+
+        <Link
+          href="/pay"
+          className="w-full py-3.5 rounded-xl border-2 border-slate-200 text-slate-600 font-semibold flex items-center justify-center gap-2 hover:bg-slate-50 transition-colors"
+        >
+          <CreditCard className="w-4 h-4" />
+          View All Pending Bills
+        </Link>
       </div>
 
       {/* ── Settlement Modal (Bottom Sheet) ──────────────── */}
@@ -573,6 +641,14 @@ export default function GuestClaimClient({
               </div>
             </div>
 
+            {/* Info Banner */}
+            <div className="bg-blue-50 p-3 rounded-xl mb-4 flex gap-3 items-start border border-blue-100">
+              <Info className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+              <p className="text-sm text-blue-800 font-medium leading-snug">
+                Bank Security: Manual entry required. Tap the amount below to copy it for easy pasting.
+              </p>
+            </div>
+
             <div className="bg-slate-50 rounded-2xl p-4 mb-5">
               <span className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
                 Your Share Breakdown
@@ -596,13 +672,26 @@ export default function GuestClaimClient({
                     {formatRM(breakdown.service)}
                   </span>
                 </div>
-                <div className="border-t border-slate-200 pt-2 mt-2 flex justify-between">
+                <div className="border-t border-slate-200 pt-2 mt-2 flex justify-between items-center">
                   <span className="font-bold text-[#1E293B]">
                     Total to Pay
                   </span>
-                  <span className="text-xl font-bold text-[#10B981]">
-                    {formatRM(breakdown.total)}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {copiedAmount && (
+                      <span className="text-xs font-bold text-[#10B981] animate-[fadeIn_0.2s]">
+                        Copied!
+                      </span>
+                    )}
+                    <button
+                      onClick={copyAmount}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-colors active:bg-emerald-200"
+                    >
+                      <span className="text-xl font-bold">
+                        {formatRM(breakdown.total)}
+                      </span>
+                      <Copy className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -619,6 +708,14 @@ export default function GuestClaimClient({
             >
               <Download className="w-4 h-4" />
               Save QR to Gallery
+            </button>
+
+            <button
+              onClick={copyProof}
+              className="w-full mt-3 py-3.5 rounded-2xl bg-slate-100 text-[#1E293B] font-semibold flex items-center justify-center gap-2 transition-all duration-200 active:bg-slate-200"
+            >
+              <Copy className="w-4 h-4" />
+              {copiedProof ? "Copied to clipboard!" : "Copy Claim Summary"}
             </button>
           </div>
         </div>

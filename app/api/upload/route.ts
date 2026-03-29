@@ -4,7 +4,7 @@ import {
   parseReceiptImage,
   MathReconciliationError,
 } from "@/src/receiptParser";
-import { registerSession, type SessionData } from "@/src/privacy";
+import { getSession, registerSession, type SessionData } from "@/src/privacy";
 import { rateLimit } from "@/src/rateLimit";
 
 // ─────────────────────────────────────────────────────────────
@@ -50,9 +50,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Parse request body
     const body = await request.json();
-    const { imageBase64, originalQrString } = body as { imageBase64?: string; originalQrString?: string; };
+    const { imageBase64, originalQrString, mergeSessionId } = body as { 
+      imageBase64?: string; 
+      originalQrString?: string;
+      mergeSessionId?: string;
+    };
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
@@ -104,20 +107,46 @@ export async function POST(request: NextRequest) {
       ...parsedReceipt,
       items: parsedReceipt.items.map((item, idx) => ({
         ...item,
-        id: `item-${idx}`,
+        id: `item-${crypto.randomUUID()}`,
       })),
     };
 
-    // 5. Generate ephemeral session ID (12-char for enumeration resistance)
-    const sessionId = generateSessionId();
+    let sessionId = mergeSessionId || generateSessionId();
+    let sessionData: SessionData;
 
-    // 6. Register session in Vercel KV (constraints.md mandate: 2-hour TTL)
-    const sessionData: SessionData = {
-      receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
-      userClaims: [],
-      settlementHash: null,
-      originalQrString,
-    };
+    if (mergeSessionId) {
+      const existing = await getSession(mergeSessionId);
+      if (!existing || !existing.receiptJson) {
+        return NextResponse.json(
+          { error: "Invalid mergeSessionId. Session not found or expired." },
+          { status: 400 },
+        );
+      }
+
+      // Merge math logic
+      const existingReceipt = existing.receiptJson as any;
+      const combinedReceipt = {
+        ...existingReceipt,
+        subtotalInCents: existingReceipt.subtotalInCents + enrichedReceipt.subtotalInCents,
+        taxInCents: existingReceipt.taxInCents + enrichedReceipt.taxInCents,
+        serviceChargeInCents: existingReceipt.serviceChargeInCents + enrichedReceipt.serviceChargeInCents,
+        grandTotalInCents: existingReceipt.grandTotalInCents + enrichedReceipt.grandTotalInCents,
+        items: [...existingReceipt.items, ...enrichedReceipt.items],
+      };
+
+      sessionData = {
+        ...existing,
+        receiptJson: combinedReceipt as Record<string, unknown>,
+      };
+    } else {
+      sessionData = {
+        receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
+        userClaims: [],
+        settlementHash: null,
+        originalQrString,
+      };
+    }
+
     await registerSession(sessionId, sessionData);
 
     // 7. Return session ID — the raw image is already gone from memory

@@ -61,6 +61,7 @@ export default function HostUploadPage() {
   const [mounted, setMounted] = useState(false);
   const [state, setState] = useState<FlowState>("idle");
   const [sessionId, setSessionId] = useState<string>("");
+  const [mergeSessionId, setMergeSessionId] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [originalQrString, setOriginalQrString] = useState<string>("");
   const [qrUploaded, setQrUploaded] = useState(false);
@@ -130,7 +131,11 @@ export default function HostUploadPage() {
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, originalQrString }),
+          body: JSON.stringify({ 
+            imageBase64: base64, 
+            originalQrString,
+            mergeSessionId: mergeSessionId.trim() || undefined
+          }),
         });
 
         const data = await res.json();
@@ -153,7 +158,7 @@ export default function HostUploadPage() {
         fileInputRef.current.value = "";
       }
     },
-    [originalQrString],
+    [originalQrString, mergeSessionId],
   );
 
   // ── Copy share link ────────────────────────────────────
@@ -171,6 +176,7 @@ export default function HostUploadPage() {
   const handleReset = () => {
     setState("idle");
     setSessionId("");
+    setMergeSessionId("");
     setErrorMsg("");
     setCopied(false);
   };
@@ -272,7 +278,7 @@ export default function HostUploadPage() {
               if (!qrUploaded) setErrorMsg("Please upload your DuitNow QR screenshot first.");
             }}
             className={`
-              block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200
+              block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200 mb-4
               ${qrUploaded
                 ? "border-[#10B981] bg-emerald-50/50 cursor-pointer hover:bg-emerald-50 hover:border-[#059669] active:scale-[0.98]"
                 : "border-slate-300 bg-slate-50 opacity-60 cursor-not-allowed"
@@ -287,6 +293,20 @@ export default function HostUploadPage() {
               EXIF data will be stripped automatically
             </span>
           </label>
+
+          {/* Merge Session Input */}
+          <div className="w-full text-left mb-6">
+            <label className="block text-xs font-semibold text-[#64748B] uppercase tracking-wider mb-2">
+              Merge with existing bill (Optional)
+            </label>
+            <input
+              type="text"
+              placeholder="Paste existing Session ID here"
+              value={mergeSessionId}
+              onChange={(e) => setMergeSessionId(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none transition-all placeholder:text-slate-400"
+            />
+          </div>
         </div>
       )}
 
