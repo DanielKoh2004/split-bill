@@ -21,6 +21,13 @@ local quantity = tonumber(ARGV[3])
 local maxQty = tonumber(ARGV[4])
 local guestName = ARGV[5]
 
+local splitCheck = 'split:' .. itemId .. ':'
+for k, _ in pairs(session) do
+  if type(k) == 'string' and string.sub(k, 1, string.len(splitCheck)) == splitCheck then
+    return -4 -- Item is being split
+  end
+end
+
 local othersClaimed = 0
 local prefix = 'claim:' .. itemId .. ':'
 local myKey = prefix .. guestId
@@ -82,6 +89,13 @@ local maxSharers = tonumber(ARGV[4])
 local splitPrefix = 'split:' .. itemId .. ':'
 local myKey = splitPrefix .. guestId
 local guestName = ARGV[5]
+
+local exclusiveCheck = 'claim:' .. itemId .. ':'
+for k, _ in pairs(session) do
+  if type(k) == 'string' and string.sub(k, 1, string.len(exclusiveCheck)) == exclusiveCheck then
+    return -4 -- Item is exclusively claimed
+  end
+end
 
 -- Count current sharers (excluding self)
 local currentSharers = 0
@@ -199,6 +213,12 @@ export async function POST(request: NextRequest) {
           { status: 409 },
         );
       }
+      if (result === -4) {
+        return NextResponse.json(
+          { error: "Item is already claimed in a different mode." },
+          { status: 409 },
+        );
+      }
 
       return NextResponse.json({ success: true });
     } else {
@@ -225,6 +245,12 @@ export async function POST(request: NextRequest) {
 
       if (result === -2) {
         return NextResponse.json({ error: "Session logic expired." }, { status: 404 });
+      }
+      if (result === -4) {
+        return NextResponse.json(
+          { error: "Item is already claimed in a different mode." },
+          { status: 409 },
+        );
       }
 
       return NextResponse.json({ success: true });

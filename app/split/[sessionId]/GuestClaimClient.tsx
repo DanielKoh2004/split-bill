@@ -373,8 +373,13 @@ export default function GuestClaimClient({
         const isSplit = mySplits.has(item.id);
         const hasSplitClaims = splitClaims[item.id] && splitClaims[item.id].size > 0;
 
-        if (isSplit || hasSplitClaims) {
-          // Already handled by fractional claims above
+        if (isSplit) {
+          // I am part of the split, handled above
+          continue;
+        }
+        if (hasSplitClaims) {
+          // I am NOT part of the split, but others are. Assign to 'others' so math reconciles.
+          allClaims.push({ userId: "others", itemId: item.id });
           continue;
         }
 
