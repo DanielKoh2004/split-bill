@@ -68,6 +68,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (payeeDuitNowId.length > 15 || !/^(?:\+60|60)[1-9]\d{7,9}$/.test(payeeDuitNowId)) {
+      return NextResponse.json(
+        { error: "Invalid DuitNow Phone Number format." },
+        { status: 400 },
+      );
+    }
+
     // ── Payload Validation ────────────────────────────────
     if (imageBase64.length > MAX_BASE64_LENGTH) {
       return NextResponse.json(

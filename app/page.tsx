@@ -59,11 +59,13 @@ export default function HostUploadPage() {
         // Convert sanitized blob to base64
         const base64 = await blobToBase64(sanitizedBlob);
 
+        const cleanId = duitNowId.replace(/[^\d+]/g, '');
+
         // POST to our API route
         const res = await fetch("/api/upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ imageBase64: base64, payeeDuitNowId: duitNowId }),
+          body: JSON.stringify({ imageBase64: base64, payeeDuitNowId: cleanId }),
         });
 
         const data = await res.json();
