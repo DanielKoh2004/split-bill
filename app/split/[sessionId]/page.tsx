@@ -1,5 +1,6 @@
 import { getSession } from "@/src/privacy";
 import GuestClaimClient from "./GuestClaimClient";
+import type { GuestClaimReceipt } from "./GuestClaimClient";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,26 @@ export default async function SplitPage({
     );
   }
 
-  // ── Handoff: pass receipt data to Client Component ────
-  return <GuestClaimClient receipt={session.receiptJson as any} />;
+  // ── Runtime shape guard (prevents hydration/type drift) ─
+  const receipt = session.receiptJson as unknown as GuestClaimReceipt;
+  if (
+    !receipt ||
+    !Array.isArray(receipt.items) ||
+    typeof receipt.grandTotalInCents !== "number"
+  ) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 px-5 text-center">
+        <h1 className="text-2xl font-bold text-[#1E293B]">
+          Invalid Session Data
+        </h1>
+        <p className="text-sm text-[#64748B] mt-2">
+          This session&apos;s data appears corrupted. Please ask the host to
+          re-upload.
+        </p>
+      </div>
+    );
+  }
+
+  // ── Handoff: pass receipt data + sessionId to Client Component ─
+  return <GuestClaimClient receipt={receipt} sessionId={sessionId} />;
 }

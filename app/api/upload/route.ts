@@ -5,6 +5,7 @@ import {
   MathReconciliationError,
 } from "@/src/receiptParser";
 import { registerSession, type SessionData } from "@/src/privacy";
+import { rateLimit } from "@/src/rateLimit";
 
 // ─────────────────────────────────────────────────────────────
 // constraints.md compliance:
@@ -12,10 +13,14 @@ import { registerSession, type SessionData } from "@/src/privacy";
 //   ✅ Zero-knowledge — raw image never stored
 //   ✅ Integer-only — all math via parseReceiptImage pipeline
 //   ✅ Fail loudly — MathReconciliationError / ZodError → 400
+//   ✅ Rate-limited — 5 requests / 60s per IP
 // ─────────────────────────────────────────────────────────────
 
+/** Max base64 payload size (~7.5 MB decoded). */
+const MAX_BASE64_LENGTH = 10 * 1024 * 1024;
+
 /** Generate a short random alphanumeric session ID. */
-function generateSessionId(length = 6): string {
+function generateSessionId(length = 12): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   let id = "";
   const bytes = new Uint8Array(length);
@@ -28,6 +33,23 @@ function generateSessionId(length = 6): string {
 
 export async function POST(request: NextRequest) {
   try {
+    // ── Rate Limiting ─────────────────────────────────────
+    const forwarded = request.headers.get("x-forwarded-for");
+    const ip = forwarded?.split(",")[0]?.trim() ?? "unknown";
+    const { allowed, retryAfterMs } = await rateLimit(ip, 5, 60_000);
+
+    if (!allowed) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": Math.ceil(retryAfterMs / 1000).toString(),
+          },
+        },
+      );
+    }
+
     // 1. Parse request body
     const body = await request.json();
     const { imageBase64 } = body as { imageBase64?: string };
@@ -35,6 +57,21 @@ export async function POST(request: NextRequest) {
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return NextResponse.json(
         { error: "Missing or invalid imageBase64 field." },
+        { status: 400 },
+      );
+    }
+
+    // ── Payload Validation ────────────────────────────────
+    if (imageBase64.length > MAX_BASE64_LENGTH) {
+      return NextResponse.json(
+        { error: "Image too large. Maximum ~7.5 MB." },
+        { status: 413 },
+      );
+    }
+
+    if (!/^[A-Za-z0-9+/=]+$/.test(imageBase64)) {
+      return NextResponse.json(
+        { error: "Invalid base64 encoding." },
         { status: 400 },
       );
     }
@@ -55,18 +92,27 @@ export async function POST(request: NextRequest) {
       model: "gemini-2.5-flash",
     });
 
-    // 4. Generate ephemeral session ID
+    // 4. Enrich items with stable IDs (ParsedReceipt has no id field)
+    const enrichedReceipt = {
+      ...parsedReceipt,
+      items: parsedReceipt.items.map((item, idx) => ({
+        ...item,
+        id: `item-${idx}`,
+      })),
+    };
+
+    // 5. Generate ephemeral session ID (12-char for enumeration resistance)
     const sessionId = generateSessionId();
 
-    // 5. Register session in Vercel KV (constraints.md mandate: 2-hour TTL)
+    // 6. Register session in Vercel KV (constraints.md mandate: 2-hour TTL)
     const sessionData: SessionData = {
-      receiptJson: parsedReceipt as unknown as Record<string, unknown>,
+      receiptJson: enrichedReceipt as unknown as Record<string, unknown>,
       userClaims: [],
       settlementHash: null,
     };
     await registerSession(sessionId, sessionData);
 
-    // 6. Return session ID — the raw image is already gone from memory
+    // 7. Return session ID — the raw image is already gone from memory
     return NextResponse.json({ sessionId }, { status: 200 });
   } catch (error) {
     // ── Fail Loudly: specific error types ────────────────
@@ -91,7 +137,7 @@ export async function POST(request: NextRequest) {
               ? error.message
               : String(error),
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 

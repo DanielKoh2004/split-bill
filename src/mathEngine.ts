@@ -23,7 +23,7 @@ export interface Receipt {
 export interface UserClaim {
   userId: string;
   itemId: string;
-  fraction: number; // conceptual only — internally we count claimants
+  fraction?: number; // DEPRECATED — never used. Engine counts claimants by array length.
 }
 
 // ── Custom Error ────────────────────────────────────────────

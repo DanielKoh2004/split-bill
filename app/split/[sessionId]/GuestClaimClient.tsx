@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   ChefHat,
   Minus,
@@ -10,6 +10,7 @@ import {
   Copy,
   X,
   Receipt,
+  AlertTriangle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { calculateSplit } from "@/src/mathEngine";
@@ -17,17 +18,17 @@ import { generateDuitNowPayload } from "@/src/duitnowQR";
 import type { Receipt as ReceiptType } from "@/src/mathEngine";
 
 // ═══════════════════════════════════════════════════════════
-// Types
+// Types (exported for page.tsx type safety)
 // ═══════════════════════════════════════════════════════════
 
-interface ReceiptItemDisplay {
+export interface ReceiptItemDisplay {
   id: string;
   name: string;
   quantity: number;
   priceInCents: number;
 }
 
-interface GuestClaimReceipt {
+export interface GuestClaimReceipt {
   merchantName: string;
   date: string;
   items: ReceiptItemDisplay[];
@@ -42,9 +43,23 @@ interface GuestClaimReceipt {
 // ═══════════════════════════════════════════════════════════
 
 const DUITNOW_ID = "+60123456789";
+const POLL_INTERVAL_MS = 3000;
 
 function formatRM(cents: number): string {
   return `RM ${(cents / 100).toFixed(2)}`;
+}
+
+/** Generate a stable guest ID, persisted in sessionStorage. */
+function getOrCreateGuestId(sessionId: string): string {
+  const storageKey = `splitbill-guest-${sessionId}`;
+  if (typeof window !== "undefined") {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing) return existing;
+    const id = crypto.randomUUID();
+    sessionStorage.setItem(storageKey, id);
+    return id;
+  }
+  return crypto.randomUUID();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -53,56 +68,154 @@ function formatRM(cents: number): string {
 
 export default function GuestClaimClient({
   receipt,
+  sessionId,
 }: {
   receipt: GuestClaimReceipt;
+  sessionId: string;
 }) {
   const items: ReceiptItemDisplay[] = receipt.items;
 
-  const mathReceipt: ReceiptType = {
-    items: items.map((i) => ({
-      id: i.id,
-      name: i.name,
-      priceInCents: i.priceInCents,
-    })),
-    subtotalInCents: receipt.subtotalInCents,
-    taxInCents: receipt.taxInCents,
-    serviceChargeInCents: receipt.serviceChargeInCents,
-    grandTotalInCents: receipt.grandTotalInCents,
-  };
+  // Memoize mathReceipt to prevent unnecessary recalculations
+  const mathReceipt: ReceiptType = useMemo(
+    () => ({
+      items: items.map((i) => ({
+        id: i.id,
+        name: i.name,
+        priceInCents: i.priceInCents,
+      })),
+      subtotalInCents: receipt.subtotalInCents,
+      taxInCents: receipt.taxInCents,
+      serviceChargeInCents: receipt.serviceChargeInCents,
+      grandTotalInCents: receipt.grandTotalInCents,
+    }),
+    [items, receipt.subtotalInCents, receipt.taxInCents, receipt.serviceChargeInCents, receipt.grandTotalInCents],
+  );
 
   // ── State ───────────────────────────────────────────────
   const [claims, setClaims] = useState<Record<string, number>>({});
+  const [othersTotals, setOthersTotals] = useState<Record<string, number>>({});
   const [showModal, setShowModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [conflictMsg, setConflictMsg] = useState<string | null>(null);
 
-  // ── Claim Handlers ────────────────────────────────────
-  const toggleSingleItem = useCallback((itemId: string) => {
-    setClaims((prev) => {
-      const next = { ...prev };
-      if (next[itemId]) {
-        delete next[itemId];
-      } else {
-        next[itemId] = 1;
+  const guestIdRef = useRef<string>("");
+  if (guestIdRef.current === "") {
+    guestIdRef.current = getOrCreateGuestId(sessionId);
+  }
+  const guestId = guestIdRef.current;
+
+  // ── Server Sync: POST claim changes ────────────────────
+  const syncClaim = useCallback(
+    async (itemId: string, quantity: number) => {
+      try {
+        const res = await fetch("/api/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, guestId, itemId, quantity }),
+        });
+        if (res.status === 409) {
+          const data = await res.json();
+          setConflictMsg(data.error ?? "Item no longer available.");
+          setTimeout(() => setConflictMsg(null), 3000);
+          // Revert: re-poll to get true state
+          await pollClaims();
+          return false;
+        }
+        if (!res.ok) {
+          console.error("Claim sync failed:", res.status);
+        }
+        return true;
+      } catch (err) {
+        console.error("Claim sync error:", err);
+        return true; // keep local state on network error (graceful degradation)
       }
-      return next;
-    });
-  }, []);
+    },
+    [sessionId, guestId],
+  );
+
+  // ── Server Sync: Poll for all claims ───────────────────
+  const pollClaims = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/claim?sessionId=${sessionId}`);
+      if (!res.ok) return;
+      const { claims: raw } = await res.json();
+      if (!raw) return;
+
+      const myNew: Record<string, number> = {};
+      const othersNew: Record<string, number> = {};
+
+      for (const [field, value] of Object.entries(raw)) {
+        const sepIdx = field.lastIndexOf(":");
+        if (sepIdx === -1) continue;
+        const itemId = field.substring(0, sepIdx);
+        const claimGuestId = field.substring(sepIdx + 1);
+        const qty = Number(value);
+
+        if (claimGuestId === guestId) {
+          myNew[itemId] = qty;
+        } else {
+          othersNew[itemId] = (othersNew[itemId] ?? 0) + qty;
+        }
+      }
+
+      setClaims(myNew);
+      setOthersTotals(othersNew);
+    } catch {
+      // Polling failure is non-fatal
+    }
+  }, [sessionId, guestId]);
+
+  // Poll on mount + interval
+  useEffect(() => {
+    pollClaims();
+    const interval = setInterval(pollClaims, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [pollClaims]);
+
+  // Clear conflict message timer
+  useEffect(() => {
+    if (!conflictMsg) return;
+    const t = setTimeout(() => setConflictMsg(null), 3000);
+    return () => clearTimeout(t);
+  }, [conflictMsg]);
+
+  // ── Claim Handlers (optimistic update + server sync) ───
+  const toggleSingleItem = useCallback(
+    (itemId: string) => {
+      setClaims((prev) => {
+        const next = { ...prev };
+        const newQty = next[itemId] ? 0 : 1;
+        if (newQty === 0) {
+          delete next[itemId];
+        } else {
+          next[itemId] = 1;
+        }
+        // Fire-and-forget sync (revert on conflict via poll)
+        syncClaim(itemId, newQty);
+        return next;
+      });
+    },
+    [syncClaim],
+  );
 
   const adjustClaim = useCallback(
     (itemId: string, maxQty: number, delta: number) => {
       setClaims((prev) => {
         const current = prev[itemId] ?? 0;
-        const next = Math.max(0, Math.min(maxQty, current + delta));
+        const othersQty = othersTotals[itemId] ?? 0;
+        const effectiveMax = maxQty - othersQty;
+        const next = Math.max(0, Math.min(effectiveMax, current + delta));
         const updated = { ...prev };
         if (next === 0) {
           delete updated[itemId];
         } else {
           updated[itemId] = next;
         }
+        syncClaim(itemId, next);
         return updated;
       });
     },
-    [],
+    [syncClaim, othersTotals],
   );
 
   // ── Backend Calculation ───────────────────────────────
@@ -117,12 +230,11 @@ export default function GuestClaimClient({
         const item = items.find((i) => i.id === itemId);
         if (!item) return [];
         if (item.quantity === 1) {
-          return [{ userId: "guest", itemId, fraction: 1 }];
+          return [{ userId: "guest", itemId }];
         }
         return Array.from({ length: qty }, () => ({
           userId: "guest",
           itemId,
-          fraction: 1 / item.quantity,
         }));
       });
 
@@ -136,14 +248,12 @@ export default function GuestClaimClient({
             allClaims.push({
               userId: "others",
               itemId: item.id,
-              fraction: 1 / item.quantity,
             });
           }
         } else if (guestQty === 0) {
           allClaims.push({
             userId: "others",
             itemId: item.id,
-            fraction: 1,
           });
         }
       }
@@ -161,17 +271,19 @@ export default function GuestClaimClient({
     return generateDuitNowPayload(DUITNOW_ID, userTotal);
   }, [userTotal]);
 
-  // ── Proportional breakdown for modal ──────────────────
+  // ── Proportional breakdown (integer math, no floats) ──
   const breakdown = useMemo(() => {
-    if (userTotal <= 0)
+    if (userTotal <= 0 || receipt.grandTotalInCents <= 0)
       return { subtotal: 0, tax: 0, service: 0, total: 0 };
-    const weight =
-      receipt.subtotalInCents > 0
-        ? userTotal / receipt.grandTotalInCents
-        : 0;
-    const subtotal = Math.round(receipt.subtotalInCents * weight);
-    const tax = Math.round(receipt.taxInCents * weight);
-    const service = userTotal - subtotal - tax;
+
+    // Multiply-before-divide: same pattern as mathEngine
+    const subtotal = Math.floor(
+      (userTotal * receipt.subtotalInCents) / receipt.grandTotalInCents,
+    );
+    const tax = Math.floor(
+      (userTotal * receipt.taxInCents) / receipt.grandTotalInCents,
+    );
+    const service = userTotal - subtotal - tax; // absorbs remainder
     return { subtotal, tax, service, total: userTotal };
   }, [userTotal, receipt]);
 
@@ -194,6 +306,16 @@ export default function GuestClaimClient({
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 relative pb-32">
+      {/* ── Conflict Banner ──────────────────────────────── */}
+      {conflictMsg && (
+        <div className="fixed top-0 left-0 right-0 z-50 flex justify-center p-3">
+          <div className="bg-amber-50 border border-amber-300 text-amber-800 px-4 py-3 rounded-2xl shadow-lg flex items-center gap-2 max-w-md w-full text-sm font-medium animate-[slideDown_0.3s_ease-out]">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            {conflictMsg}
+          </div>
+        </div>
+      )}
+
       {/* ── Header ──────────────────────────────────────── */}
       <header className="px-5 pt-8 pb-4">
         <div className="flex items-center gap-3 mb-1">
@@ -257,8 +379,11 @@ export default function GuestClaimClient({
 
         {items.map((item) => {
           const claimed = claims[item.id] ?? 0;
+          const othersQty = othersTotals[item.id] ?? 0;
+          const remaining = item.quantity - claimed - othersQty;
           const isSingle = item.quantity === 1;
           const isSelected = claimed > 0;
+          const isTakenByOthers = isSingle && othersQty >= 1 && claimed === 0;
 
           return (
             <div
@@ -267,6 +392,8 @@ export default function GuestClaimClient({
                 bg-white rounded-2xl p-4 shadow-sm border-2 transition-all duration-200
                 ${isSelected
                   ? "border-[#10B981] shadow-[0_0_0_1px_rgba(16,185,129,0.1)]"
+                  : isTakenByOthers
+                  ? "border-transparent opacity-50"
                   : "border-transparent"
                 }
               `}
@@ -280,8 +407,11 @@ export default function GuestClaimClient({
                     {formatRM(item.priceInCents)}
                     {item.quantity > 1 && (
                       <span className="ml-1">
-                        · {item.quantity} on bill
+                        · {remaining} of {item.quantity} available
                       </span>
+                    )}
+                    {isTakenByOthers && (
+                      <span className="ml-1 text-amber-600">· Claimed</span>
                     )}
                   </p>
                 </div>
@@ -289,11 +419,14 @@ export default function GuestClaimClient({
                 {isSingle ? (
                   <button
                     onClick={() => toggleSingleItem(item.id)}
+                    disabled={isTakenByOthers}
                     className={`
                       w-8 h-8 rounded-full border-2 flex items-center justify-center
                       transition-all duration-200 shrink-0
                       ${isSelected
                         ? "bg-[#10B981] border-[#10B981]"
+                        : isTakenByOthers
+                        ? "border-slate-200 bg-slate-100 cursor-not-allowed"
                         : "border-[#64748B] bg-transparent"
                       }
                     `}
@@ -332,11 +465,11 @@ export default function GuestClaimClient({
 
                     <button
                       onClick={() => adjustClaim(item.id, item.quantity, +1)}
-                      disabled={claimed >= item.quantity}
+                      disabled={remaining <= 0}
                       className={`
                         w-8 h-8 rounded-full flex items-center justify-center
                         border-2 transition-all duration-200
-                        ${claimed >= item.quantity
+                        ${remaining <= 0
                           ? "border-slate-200 text-slate-300 cursor-not-allowed"
                           : "border-[#10B981] text-[#10B981] active:bg-emerald-50"
                         }
