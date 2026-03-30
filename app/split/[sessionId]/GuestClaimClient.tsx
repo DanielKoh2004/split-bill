@@ -144,6 +144,7 @@ export default function GuestClaimClient({
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [copiedAmount, setCopiedAmount] = useState(false);
   const [copiedProof, setCopiedProof] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
 
   const pendingSyncsRef = useRef(0);
 
@@ -181,11 +182,12 @@ export default function GuestClaimClient({
         }
         if (!res.ok) {
           console.error("Claim sync failed:", res.status);
+          return false;
         }
         return true;
       } catch (err) {
         console.error("Claim sync error:", err);
-        return true;
+        return false;
       } finally {
         pendingSyncsRef.current -= 1;
       }
@@ -198,7 +200,11 @@ export default function GuestClaimClient({
     if (pendingSyncsRef.current > 0) return;
     try {
       const res = await fetch(`/api/claim?sessionId=${sessionId}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        setIsOnline(false);
+        return;
+      }
+      setIsOnline(true);
       const { claims: raw } = await res.json();
       if (!raw) return;
 
@@ -246,7 +252,7 @@ export default function GuestClaimClient({
       setSplitClaims(splitNew);
       setMySplits(mySplitNew);
     } catch {
-      // Polling failure is non-fatal
+      setIsOnline(false);
     }
   }, [sessionId, guestId]);
 
@@ -265,11 +271,15 @@ export default function GuestClaimClient({
 
   // ── Claim Handlers ────────────────────────────────────
   const toggleSingleItem = useCallback(
-    (itemId: string) => {
+    async (itemId: string) => {
+      if (!isOnline) return;
+      const backupClaims = { ...claims };
+      const backupSplits = new Set(mySplits);
+
       // If currently splitting this item, remove split first
       if (mySplits.has(itemId)) {
         setMySplits((prev) => { const n = new Set(prev); n.delete(itemId); return n; });
-        syncClaim(itemId, 0, "split");
+        await syncClaim(itemId, 0, "split");
       }
 
       const isClaimed = !!claims[itemId];
@@ -282,37 +292,61 @@ export default function GuestClaimClient({
         return next;
       });
 
-      syncClaim(itemId, newQty, "exclusive");
+      const success = await syncClaim(itemId, newQty, "exclusive");
+      if (!success) {
+        setClaims(backupClaims);
+        setMySplits(backupSplits);
+        setConflictMsg("Network error. Please try again.");
+      }
     },
-    [claims, mySplits, syncClaim],
+    [claims, mySplits, syncClaim, isOnline],
   );
 
   const toggleSplitItem = useCallback(
-    (itemId: string) => {
+    async (itemId: string) => {
+      if (!isOnline) return;
+      const backupClaims = { ...claims };
+      const backupSplits = new Set(mySplits);
+
       // If exclusively claimed, remove exclusive first
       if (claims[itemId]) {
         setClaims((prev) => { const n = { ...prev }; delete n[itemId]; return n; });
-        syncClaim(itemId, 0, "exclusive");
+        await syncClaim(itemId, 0, "exclusive");
       }
 
       const isSplit = mySplits.has(itemId);
       if (isSplit) {
         setMySplits((prev) => { const n = new Set(prev); n.delete(itemId); return n; });
-        syncClaim(itemId, 0, "split");
+        const success = await syncClaim(itemId, 0, "split");
+        if (!success) {
+          setClaims(backupClaims);
+          setMySplits(backupSplits);
+          setConflictMsg("Network error. Please try again.");
+        }
       } else {
         setMySplits((prev) => new Set(prev).add(itemId));
-        syncClaim(itemId, 1, "split");
+        const success = await syncClaim(itemId, 1, "split");
+        if (!success) {
+          setClaims(backupClaims);
+          setMySplits(backupSplits);
+          setConflictMsg("Network error. Please try again.");
+        }
       }
     },
-    [claims, mySplits, syncClaim],
+    [claims, mySplits, syncClaim, isOnline],
   );
 
   const adjustClaim = useCallback(
-    (itemId: string, maxQty: number, delta: number) => {
+    async (itemId: string, maxQty: number, delta: number) => {
+      if (!isOnline) return;
+      
+      const backupClaims = { ...claims };
       const current = claims[itemId] ?? 0;
       const othersQty = othersTotals[itemId] ?? 0;
       const effectiveMax = maxQty - othersQty;
       const next = Math.max(0, Math.min(effectiveMax, current + delta));
+      
+      if (current === next) return;
 
       setClaims((prev) => {
         const updated = { ...prev };
@@ -321,9 +355,13 @@ export default function GuestClaimClient({
         return updated;
       });
 
-      syncClaim(itemId, next, "exclusive");
+      const success = await syncClaim(itemId, next, "exclusive");
+      if (!success) {
+        setClaims(backupClaims);
+        setConflictMsg("Network error. Please try again.");
+      }
     },
-    [claims, othersTotals, syncClaim],
+    [claims, othersTotals, syncClaim, isOnline],
   );
 
   // ── Total Calculation ─────────────────────────────────
@@ -606,9 +644,16 @@ export default function GuestClaimClient({
           <p className="text-sm text-secondary-themed leading-relaxed flex-1">
             {t.selectWhatYouAte}
           </p>
-          <span className="shrink-0 px-3 py-1 rounded-lg bg-[#10B981]/10 text-[#10B981] text-xs font-bold">
-            {guestName}
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            {isOnline ? (
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-[pulse_2s_ease-in-out_infinite]" title="Online" />
+            ) : (
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500" title="Offline" />
+            )}
+            <span className="shrink-0 px-3 py-1 rounded-lg bg-[#10B981]/10 text-[#10B981] text-xs font-bold">
+              {guestName}
+            </span>
+          </div>
         </div>
       </header>
 
@@ -716,13 +761,13 @@ export default function GuestClaimClient({
                         {/* Exclusive claim toggle */}
                         <button
                           onClick={() => toggleSingleItem(item.id)}
-                          disabled={isTakenByOthers}
+                          disabled={isTakenByOthers || !isOnline}
                           className={`
                             w-8 h-8 rounded-full border-2 flex items-center justify-center
                             transition-all duration-200
                             ${isSelected
                               ? "bg-[#10B981] border-[#10B981]"
-                              : isTakenByOthers
+                              : isTakenByOthers || !isOnline
                               ? "border-themed bg-elevated-themed cursor-not-allowed"
                               : "border-[#64748B] bg-transparent"
                             }
@@ -737,10 +782,13 @@ export default function GuestClaimClient({
                         {/* Split toggle */}
                         <button
                           onClick={() => toggleSplitItem(item.id)}
+                          disabled={!isOnline}
                           className={`
                             w-8 h-8 rounded-full border-2 flex items-center justify-center
                             transition-all duration-200
-                            ${isSplitting
+                            ${!isOnline 
+                              ? "border-themed bg-elevated-themed cursor-not-allowed text-muted-themed"
+                              : isSplitting
                               ? "bg-purple-500 border-purple-500 text-white"
                               : "border-purple-300 text-purple-400 hover:border-purple-500"
                             }
@@ -755,11 +803,11 @@ export default function GuestClaimClient({
                       <div className="flex items-center gap-3 shrink-0">
                         <button
                           onClick={() => adjustClaim(item.id, item.quantity, -1)}
-                          disabled={claimed === 0}
+                          disabled={claimed === 0 || !isOnline}
                           className={`
                             w-8 h-8 rounded-full flex items-center justify-center
                             border-2 transition-all duration-200
-                            ${claimed === 0
+                            ${claimed === 0 || !isOnline
                               ? "border-themed text-muted-themed cursor-not-allowed"
                               : "border-[#FC7C78] text-[#FC7C78] active:bg-red-500/10"
                             }
@@ -775,11 +823,11 @@ export default function GuestClaimClient({
 
                         <button
                           onClick={() => adjustClaim(item.id, item.quantity, +1)}
-                          disabled={remaining <= 0}
+                          disabled={remaining <= 0 || !isOnline}
                           className={`
                             w-8 h-8 rounded-full flex items-center justify-center
                             border-2 transition-all duration-200
-                            ${remaining <= 0
+                            ${remaining <= 0 || !isOnline
                               ? "border-themed text-muted-themed cursor-not-allowed"
                               : "border-[#10B981] text-[#10B981] active:bg-emerald-500/10"
                             }
