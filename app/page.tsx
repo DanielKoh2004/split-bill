@@ -908,8 +908,8 @@ export default function HostUploadPage() {
                       className="w-full px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none placeholder:text-muted-themed"
                     />
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 flex items-center gap-2">
-                        <span className="text-xs font-semibold text-secondary-themed uppercase w-8">Qty</span>
+                      <div className="flex-1 flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-semibold text-secondary-themed uppercase w-7 shrink-0">Qty</span>
                         <input
                           type="number"
                           min="1"
@@ -919,11 +919,11 @@ export default function HostUploadPage() {
                             newItems[index].quantity = parseInt(e.target.value) || 1;
                             setManualItems(newItems);
                           }}
-                          className="flex-1 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
+                          className="w-full min-w-0 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
                         />
                       </div>
-                      <div className="flex-1 flex items-center gap-2">
-                        <span className="text-xs font-semibold text-secondary-themed uppercase w-8">RM</span>
+                      <div className="flex-1 flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-semibold text-secondary-themed uppercase w-6 shrink-0 text-right">RM</span>
                         <input
                           type="number"
                           step="0.01"
@@ -934,7 +934,7 @@ export default function HostUploadPage() {
                             newItems[index].priceInput = e.target.value;
                             setManualItems(newItems);
                           }}
-                          className="flex-1 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
+                          className="w-full min-w-0 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
                         />
                       </div>
                     </div>
