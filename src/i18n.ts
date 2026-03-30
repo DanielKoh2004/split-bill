@@ -49,6 +49,8 @@ export interface Translations {
   shareLink: string;
   copyShareLink: string;
   copied: string;
+  inviteFriends: string;
+  inviteText: string;
   sessionIdForMerging: string;
   copyId: string;
   sessionIdNote: string;
@@ -178,6 +180,8 @@ const en: Translations = {
   shareLink: "Share Link",
   copyShareLink: "Copy Share Link",
   copied: "Copied!",
+  inviteFriends: "Invite Friends",
+  inviteText: "[MERCHANT] is ready to split! Tap here to claim your share: ",
   sessionIdForMerging: "Session ID (for Merging)",
   copyId: "Copy ID",
   sessionIdNote: "Use this ID if you want to add another receipt to this bill later.",
@@ -297,6 +301,8 @@ const zh: Translations = {
   shareLink: "分享链接",
   copyShareLink: "复制分享链接",
   copied: "已复制！",
+  inviteFriends: "邀请朋友",
+  inviteText: "[MERCHANT] 的账单已准备好！点击这里认领你的份额: ",
   sessionIdForMerging: "会话 ID（用于合并）",
   copyId: "复制 ID",
   sessionIdNote: "如果你想稍后添加另一张收据到此账单，请使用此 ID。",

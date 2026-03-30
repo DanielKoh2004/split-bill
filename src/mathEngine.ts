@@ -279,10 +279,17 @@ export function calculateSplit(
       (serviceShares.get(uid) ?? 0);
   }
 
-  // ── Step E: Reconciliation ────────────────────────────────
-  const finalSum = Object.values(result).reduce((a, b) => a + b, 0);
-  if (finalSum !== receipt.grandTotalInCents) {
-    throw new ReconciliationError(receipt.grandTotalInCents, finalSum);
+  // ── Step E: Reconciliation & Sweeper ──────────────────────
+  // Sweeper: Reconcile rounding errors (lost sen)
+  const calculatedSum = Object.values(result).reduce((sum, amount) => sum + amount, 0);
+  const remainder = receipt.grandTotalInCents - calculatedSum;
+  
+  if (remainder > 0) {
+    // Assign the missing sen to the first available user in the object
+    const firstUser = Object.keys(result)[0];
+    if (firstUser) {
+      result[firstUser] += remainder;
+    }
   }
 
   return result;

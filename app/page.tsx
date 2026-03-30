@@ -16,6 +16,7 @@ import {
   Server,
   Users,
   Image as ImageIcon,
+  Share,
 } from "lucide-react";
 import Link from "next/link";
 import { parseQRImage } from "@/src/duitnowQR";
@@ -378,6 +379,27 @@ export default function HostUploadPage() {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       /* clipboard not available */
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (!shareUrl || !reviewReceipt) return;
+    const text = t.inviteText.replace("[MERCHANT]", reviewReceipt.merchantName);
+    
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Split Bill",
+          text: text,
+          url: shareUrl,
+        });
+      } else {
+        await navigator.clipboard.writeText(`${text}${shareUrl}`);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      // ignore user cancellation or failure
     }
   };
 
@@ -1089,18 +1111,32 @@ export default function HostUploadPage() {
             </p>
           </div>
 
-          {/* Copy Button */}
-          <button
-            onClick={handleCopy}
-            className="
-              w-full py-4 rounded-2xl bg-card-themed text-primary-themed border-2 border-themed font-bold text-lg
-              flex items-center justify-center gap-2 transition-all duration-200
-              hover:border-[#10B981] active:bg-elevated-themed shadow-card-themed mb-6
-            "
-          >
-            <Copy className="w-5 h-5" />
-            {copied ? t.copied : t.copyShareLink}
-          </button>
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-3 mb-6">
+            <button
+              onClick={handleNativeShare}
+              className="
+                w-full py-4 rounded-2xl bg-[#10B981] text-white font-bold text-lg
+                flex items-center justify-center gap-2 transition-all duration-200
+                hover:opacity-90 active:scale-[0.98] shadow-lg shadow-emerald-500/20
+              "
+            >
+              <Share className="w-5 h-5" />
+              {t.inviteFriends}
+            </button>
+
+            <button
+              onClick={handleCopy}
+              className="
+                w-full py-4 rounded-2xl bg-card-themed text-primary-themed border-2 border-themed font-bold text-lg
+                flex items-center justify-center gap-2 transition-all duration-200
+                hover:border-[#10B981] active:bg-elevated-themed shadow-card-themed
+              "
+            >
+              <Copy className="w-5 h-5" />
+              {copied ? t.copied : t.copyShareLink}
+            </button>
+          </div>
 
           {/* Session ID for Merging */}
           <div className="bg-card-themed rounded-2xl p-4 mb-6 border border-themed shadow-card-themed text-left">
