@@ -107,6 +107,10 @@ export default function HostUploadPage() {
   const [isWiping, setIsWiping] = useState(false);
   const [settledGuests, setSettledGuests] = useState<Set<string>>(new Set());
 
+  // ── Manual Entry State ──────────────────────────────────
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualItems, setManualItems] = useState([{ id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }]);
+
   useEffect(() => {
     setMounted(true);
     const savedInfo = localStorage.getItem("duitnow_original_qr");
@@ -195,6 +199,38 @@ export default function HostUploadPage() {
   };
 
   // ── Handle file selection → Upload Phase 1 ────────────
+  const handleManualSubmit = () => {
+    const validItems = manualItems.filter(item => item.name.trim() !== "");
+    if (validItems.length === 0) {
+      setErrorMsg("Please add at least one valid item.");
+      return;
+    }
+    const mappedItems = validItems.map(item => ({
+      id: item.id,
+      name: item.name.trim(),
+      quantity: item.quantity,
+      priceInCents: Math.round(parseFloat(item.priceInput || "0") * 100)
+    }));
+    
+    const calculatedSubtotal = mappedItems.reduce((sum, item) => sum + (item.priceInCents * item.quantity), 0);
+    
+    const manualReceipt: ReviewReceipt = {
+      merchantName: "Manual Entry",
+      date: new Date().toLocaleDateString(),
+      items: mappedItems,
+      subtotalInCents: calculatedSubtotal,
+      taxInCents: 0,
+      serviceChargeInCents: 0,
+      grandTotalInCents: calculatedSubtotal
+    };
+    
+    setReviewReceipt(manualReceipt);
+    setSectionName("");
+    setIncludeReceiptPreview(false);
+    setErrorMsg("");
+    setState("review");
+  };
+
   const handleFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -429,6 +465,8 @@ export default function HostUploadPage() {
     setEditingItemId(null);
     setIsFinalizingReview(false);
     setLiveStatus(null);
+    setShowManualEntry(false);
+    setManualItems([{ id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }]);
   };
 
   // ── Clear All Sessions ─────────────────────────────────
@@ -797,40 +835,142 @@ export default function HostUploadPage() {
             )}
           </div>
 
-          {/* Hidden file input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileChange}
-            disabled={!qrUploaded}
-            className="hidden"
-            id="receipt-upload"
-          />
+          {!showManualEntry ? (
+            <>
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileChange}
+                disabled={!qrUploaded}
+                className="hidden"
+                id="receipt-upload"
+              />
 
-          {/* Upload target area */}
-          <label
-            htmlFor={qrUploaded ? "receipt-upload" : undefined}
-            onClick={() => {
-              if (!qrUploaded) setErrorMsg(t.uploadQrFirst);
-            }}
-            className={`
-              block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200 mb-4
-              ${qrUploaded
-                ? "border-[#10B981] bg-[#10B981]/5 cursor-pointer hover:bg-[#10B981]/10 hover:border-[#059669] active:scale-[0.98]"
-                : "border-themed bg-elevated-themed opacity-60 cursor-not-allowed"
-              }
-            `}
-          >
-            <Camera className={`w-10 h-10 mx-auto mb-3 ${qrUploaded ? "text-[#10B981]" : "text-muted-themed"}`} />
-            <span className={`text-lg font-bold ${qrUploaded ? "text-[#10B981]" : "text-secondary-themed"}`}>
-              {t.snapReceipt}
-            </span>
-            <span className="block text-xs text-secondary-themed mt-1">
-              {t.exifStripped}
-            </span>
-          </label>
+              {/* Upload target area */}
+              <label
+                htmlFor={qrUploaded ? "receipt-upload" : undefined}
+                onClick={() => {
+                  if (!qrUploaded) setErrorMsg(t.uploadQrFirst);
+                }}
+                className={`
+                  block w-full py-16 rounded-3xl border-2 border-dashed transition-all duration-200 mb-4
+                  ${qrUploaded
+                    ? "border-[#10B981] bg-[#10B981]/5 cursor-pointer hover:bg-[#10B981]/10 hover:border-[#059669] active:scale-[0.98]"
+                    : "border-themed bg-elevated-themed opacity-60 cursor-not-allowed"
+                  }
+                `}
+              >
+                <Camera className={`w-10 h-10 mx-auto mb-3 ${qrUploaded ? "text-[#10B981]" : "text-muted-themed"}`} />
+                <span className={`text-lg font-bold ${qrUploaded ? "text-[#10B981]" : "text-secondary-themed"}`}>
+                  {t.snapReceipt}
+                </span>
+                <span className="block text-xs text-secondary-themed mt-1">
+                  {t.exifStripped}
+                </span>
+              </label>
+
+              {qrUploaded && (
+                <button 
+                  onClick={() => setShowManualEntry(true)}
+                  className="w-full py-4 rounded-3xl border-2 border-themed bg-card-themed text-primary-themed hover:bg-elevated-themed transition-all duration-200 mb-4 font-bold text-sm active:scale-[0.98] cursor-pointer"
+                >
+                  Enter Receipt Manually
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="w-full text-left mb-6 bg-card-themed p-5 rounded-3xl border border-themed shadow-card-themed animate-[slideDown_0.2s_ease-out]">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-primary-themed">Manual Entry</h3>
+                <button 
+                  onClick={() => setShowManualEntry(false)}
+                  className="text-xs font-semibold text-secondary-themed bg-elevated-themed px-3 py-1.5 rounded-lg hover:text-primary-themed transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+              
+              <div className="space-y-4 mb-4">
+                {manualItems.map((item, index) => (
+                  <div key={item.id} className="flex flex-col gap-2 p-3 bg-elevated-themed rounded-xl border border-themed relative group">
+                    <input
+                      type="text"
+                      placeholder="Item name"
+                      value={item.name}
+                      onChange={(e) => {
+                        const newItems = [...manualItems];
+                        newItems[index].name = e.target.value;
+                        setManualItems(newItems);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none placeholder:text-muted-themed"
+                    />
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex items-center gap-2">
+                        <span className="text-xs font-semibold text-secondary-themed uppercase w-8">Qty</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const newItems = [...manualItems];
+                            newItems[index].quantity = parseInt(e.target.value) || 1;
+                            setManualItems(newItems);
+                          }}
+                          className="flex-1 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
+                        />
+                      </div>
+                      <div className="flex-1 flex items-center gap-2">
+                        <span className="text-xs font-semibold text-secondary-themed uppercase w-8">RM</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={item.priceInput}
+                          onChange={(e) => {
+                            const newItems = [...manualItems];
+                            newItems[index].priceInput = e.target.value;
+                            setManualItems(newItems);
+                          }}
+                          className="flex-1 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
+                        />
+                      </div>
+                    </div>
+                    {manualItems.length > 1 && (
+                      <button
+                        onClick={() => {
+                          setManualItems(manualItems.filter(mi => mi.id !== item.id));
+                        }}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white p-1.5 rounded-full shadow hover:bg-red-600 transition-opacity z-10"
+                        aria-label="Remove item"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              <button
+                onClick={() => {
+                  setManualItems([...manualItems, { id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }]);
+                }}
+                className="w-full py-2.5 rounded-xl border border-dashed border-[#10B981] text-[#10B981] font-semibold text-sm hover:bg-[#10B981]/10 transition-colors mb-4 flex items-center justify-center gap-1.5"
+              >
+                + Add Item
+              </button>
+              
+              <button
+                onClick={handleManualSubmit}
+                className="w-full py-3.5 rounded-xl bg-[#10B981] text-white font-bold text-base shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2"
+              >
+                <ArrowRight className="w-4 h-4" />
+                Review Receipt
+              </button>
+            </div>
+          )}
 
           {/* Merge Session Input */}
           <div className="w-full text-left mb-6">
