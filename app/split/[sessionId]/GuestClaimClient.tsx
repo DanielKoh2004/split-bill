@@ -145,6 +145,8 @@ export default function GuestClaimClient({
   const [copiedAmount, setCopiedAmount] = useState(false);
   const [copiedProof, setCopiedProof] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showSplitWarning, setShowSplitWarning] = useState(false);
 
   const pendingSyncsRef = useRef(0);
 
@@ -685,6 +687,40 @@ export default function GuestClaimClient({
         </div>
       </div>
 
+      {/* Inline Tutorial Legend */}
+      {showLegend && (
+        <div className="mx-5 mb-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl relative shadow-sm">
+          <button
+            onClick={() => setShowLegend(false)}
+            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-indigo-500/60 hover:text-indigo-500 transition-colors bg-transparent rounded-full hover:bg-indigo-500/10"
+            aria-label="Dismiss tutorial"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          
+          <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5" />
+            How to Claim
+          </h3>
+          
+          <div className="space-y-3 text-sm text-indigo-900/80 dark:text-indigo-200/80 leading-snug">
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center mt-0.5 shadow-sm">
+                <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
+              </div>
+              <p>Tap to claim an item just for yourself.</p>
+            </div>
+            
+            <div className="flex items-start gap-3">
+              <div className="shrink-0 w-6 h-6 rounded-full bg-purple-500 flex items-center justify-center mt-0.5 shadow-sm">
+                <Users className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+              </div>
+              <p>Tap to split an item. Wait for others to tap it too!</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Item Cards (Grouped by Section) */}
       <div className="px-5 space-y-3">
         <span className="text-xs font-semibold text-secondary-themed uppercase tracking-wider">
@@ -854,7 +890,13 @@ export default function GuestClaimClient({
         </div>
 
         <button
-          onClick={() => setShowModal(true)}
+          onClick={() => {
+            if (mySplits.size > 0) {
+              setShowSplitWarning(true);
+            } else {
+              setShowModal(true);
+            }
+          }}
           disabled={!hasItems || userTotal <= 0}
           className={`
             w-full py-4 rounded-2xl text-white font-bold text-lg
@@ -877,6 +919,48 @@ export default function GuestClaimClient({
           {t.viewAllPendingBills}
         </Link>
       </div>
+
+      {/* ── Split Warning Guardrail ──────────────────────── */}
+      {showSplitWarning && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-5"
+          onClick={() => setShowSplitWarning(false)}
+        >
+          <div className="absolute inset-0 backdrop-blur-sm" style={{ backgroundColor: 'var(--bg-modal-overlay)' }} />
+          <div
+            className="relative w-full max-w-sm bg-card-themed rounded-3xl p-6 animate-[slideUp_0.2s_ease-out] shadow-2xl border border-themed text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-amber-500/20">
+              <AlertTriangle className="w-8 h-8 text-amber-500" />
+            </div>
+            
+            <h2 className="text-xl font-bold text-primary-themed mb-2">Wait a second!</h2>
+            <p className="text-sm text-secondary-themed mb-6 leading-relaxed">
+              You are splitting items! To get the correct math, make sure everyone sharing with you has also selected these items on their screens before you continue.
+            </p>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setShowSplitWarning(false)}
+                className="w-full py-3.5 rounded-xl bg-elevated-themed text-primary-themed font-bold text-sm border border-themed hover:bg-input-themed transition-colors"
+                autoFocus
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => {
+                  setShowSplitWarning(false);
+                  setShowModal(true);
+                }}
+                className="w-full py-3.5 rounded-xl bg-amber-500 text-white font-bold text-sm shadow-lg shadow-amber-500/20 hover:bg-amber-600 transition-colors"
+              >
+                Generate QR Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Receipt Preview Modal ────────────────────────── */}
       {showReceiptModal && (
