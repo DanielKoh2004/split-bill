@@ -602,7 +602,7 @@ export default function GuestClaimClient({
   // ═══════════════════════════════════════════════════════
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-themed relative pb-32">
+    <div className="max-w-md mx-auto min-h-screen bg-themed relative pb-56">
       <ToggleBar />
 
       {/* Conflict Banner */}
