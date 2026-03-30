@@ -130,8 +130,10 @@ export default function HostUploadPage() {
         });
         if (!res.ok) {
           if (res.status === 404 || res.status === 403) {
-            // Session gone or invalid proof
+            // Session gone or invalid proof — clear stale resume badge
             setLiveStatus(null);
+            setLastSession(null);
+            localStorage.removeItem("last_active_session");
           }
           return;
         }
@@ -163,14 +165,22 @@ export default function HostUploadPage() {
     setErrorMsg("");
     try {
       const payload = await parseQRImage(file);
-      if (!payload || payload.length < 50 || !payload.startsWith("000201")) {
-        throw new Error("Invalid format. Please ensure you upload a valid DuitNow QR (must start with 000201).");
+      if (!payload || payload.trim().length < 50) {
+        throw new Error(t.qrInvalidFormat);
       }
-      setOriginalQrString(payload);
+
+      // Relaxed EMVCo check: the payload should start with a valid TLV tag "00"
+      // Value "01" means static, "11" or "12" means dynamic — all are valid.
+      const trimmed = payload.trim();
+      if (!trimmed.startsWith("0002")) {
+        throw new Error(t.qrInvalidFormat);
+      }
+
+      setOriginalQrString(trimmed);
       setQrUploaded(true);
-      localStorage.setItem("duitnow_original_qr", payload);
+      localStorage.setItem("duitnow_original_qr", trimmed);
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to parse DuitNow QR.");
+      setErrorMsg(err instanceof Error ? err.message : t.qrParseFailed);
       setQrUploaded(false);
     }
   };
@@ -611,7 +621,7 @@ export default function HostUploadPage() {
                   <h3 className="font-bold text-primary-themed">{t.liveDashboard}</h3>
                 </div>
                 <Link href={`/split/${lastSession?.sessionId}`} className="text-xs text-[#10B981] font-semibold hover:underline">
-                  View link
+                  {t.viewLink}
                 </Link>
               </div>
 

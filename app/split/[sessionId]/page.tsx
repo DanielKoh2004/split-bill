@@ -1,6 +1,7 @@
 import { getSession } from "@/src/privacy";
 import GuestClaimClient from "./GuestClaimClient";
 import type { GuestClaimReceipt } from "./GuestClaimClient";
+import { SessionExpired, InvalidSessionData } from "./SessionErrors";
 
 export const dynamic = "force-dynamic";
 
@@ -13,26 +14,12 @@ export default async function SplitPage({
   const session = await getSession(sessionId);
 
   if (!session || !session.receiptJson) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-themed px-5 text-center">
-        <h1 className="text-2xl font-bold text-primary-themed">Session Expired</h1>
-        <p className="text-sm text-secondary-themed mt-2">
-          This bill has already been settled, or the session was wiped for privacy.
-        </p>
-      </div>
-    );
+    return <SessionExpired />;
   }
 
   const receipt = session.receiptJson as unknown as GuestClaimReceipt;
   if (!receipt || !Array.isArray(receipt.items) || typeof receipt.grandTotalInCents !== "number") {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-themed px-5 text-center">
-        <h1 className="text-2xl font-bold text-primary-themed">Invalid Session Data</h1>
-        <p className="text-sm text-secondary-themed mt-2">
-          This session&apos;s data appears corrupted. Please ask the host to re-upload.
-        </p>
-      </div>
-    );
+    return <InvalidSessionData />;
   }
 
   return (
@@ -44,3 +31,4 @@ export default async function SplitPage({
     />
   );
 }
+

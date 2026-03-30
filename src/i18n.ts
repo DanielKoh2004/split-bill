@@ -64,6 +64,11 @@ export interface Translations {
   clearAllDesc: string;
   uploadQrFirst: string;
 
+  // QR errors
+  qrInvalidFormat: string;
+  qrParseFailed: string;
+  qrNoCode: string;
+
   // Host Dashboard
   liveDashboard: string;
   settlementProgress: string;
@@ -120,9 +125,16 @@ export interface Translations {
   copyClaimSummary: string;
   copiedToClipboard: string;
 
-  // General
   general: string;
   of: string;
+
+  // Session expired (server page)
+  sessionExpired: string;
+  sessionExpiredDesc: string;
+  invalidSessionData: string;
+  invalidSessionDataDesc: string;
+  viewLink: string;
+  markAsPaidConfirm: string;
 }
 
 const en: Translations = {
@@ -179,6 +191,10 @@ const en: Translations = {
   clearAllDesc: "Removes saved QR, session history, and pending bills. Use this to start fresh.",
   uploadQrFirst: "Please upload your DuitNow QR screenshot first.",
 
+  qrInvalidFormat: "Invalid format. Please ensure you upload a valid DuitNow or TNG eWallet QR.",
+  qrParseFailed: "Failed to read QR code from the image. Please try a clearer screenshot.",
+  qrNoCode: "No QR code found in the image.",
+
   liveDashboard: "Live Dashboard",
   settlementProgress: "Settlement Progress",
   claimedOf: "claimed",
@@ -231,6 +247,13 @@ const en: Translations = {
 
   general: "General",
   of: "of",
+
+  sessionExpired: "Session Expired",
+  sessionExpiredDesc: "This bill has already been settled, or the session was wiped for privacy.",
+  invalidSessionData: "Invalid Session Data",
+  invalidSessionDataDesc: "This session's data appears corrupted. Please ask the host to re-upload.",
+  viewLink: "View link",
+  markAsPaidConfirm: "Are you sure? This will remove the bill from your device permanently.",
 };
 
 const zh: Translations = {
@@ -287,6 +310,10 @@ const zh: Translations = {
   clearAllDesc: "移除已保存的二维码、会话记录和待付账单。",
   uploadQrFirst: "请先上传你的 DuitNow 二维码截图。",
 
+  qrInvalidFormat: "格式无效。请确保上传有效的 DuitNow 或 TNG 电子钱包二维码。",
+  qrParseFailed: "无法从图片中读取二维码。请尝试更清晰的截图。",
+  qrNoCode: "图片中未找到二维码。",
+
   liveDashboard: "实时面板",
   settlementProgress: "结算进度",
   claimedOf: "已选",
@@ -339,6 +366,13 @@ const zh: Translations = {
 
   general: "通用",
   of: "/",
+
+  sessionExpired: "会话已过期",
+  sessionExpiredDesc: "此账单已结清，或会话已被清除以保护隐私。",
+  invalidSessionData: "会话数据无效",
+  invalidSessionDataDesc: "此会话的数据似乎已损坏。请联系主人重新上传。",
+  viewLink: "查看链接",
+  markAsPaidConfirm: "确定吗？这将从你的设备中永久移除此账单。",
 };
 
 export const translations: Record<Locale, Translations> = { en, zh };
