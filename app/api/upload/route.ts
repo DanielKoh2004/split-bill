@@ -1,3 +1,5 @@
+export const maxDuration = 60; // Allow function to run for up to 60 seconds
+
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import {

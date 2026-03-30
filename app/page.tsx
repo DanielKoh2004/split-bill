@@ -200,17 +200,14 @@ export default function HostUploadPage() {
 
   // ── Handle file selection → Upload Phase 1 ────────────
   const handleManualSubmit = () => {
-    const validItems = manualItems.filter(item => item.name.trim() !== "");
-    if (validItems.length === 0) {
-      setErrorMsg("Please add at least one valid item.");
-      return;
-    }
-    const mappedItems = validItems.map(item => ({
-      id: item.id,
-      name: item.name.trim(),
-      quantity: item.quantity,
-      priceInCents: Math.round(parseFloat(item.priceInput || "0") * 100)
-    }));
+    const mappedItems = manualItems
+      .filter(item => item.name.trim() !== "")
+      .map(item => ({
+        id: item.id || crypto.randomUUID(),
+        name: item.name.trim(),
+        quantity: parseInt(item.quantity.toString(), 10) || 1,
+        priceInCents: Math.round(parseFloat(item.priceInput || "0") * 100)
+      }));
     
     const calculatedSubtotal = mappedItems.reduce((sum, item) => sum + (item.priceInCents * item.quantity), 0);
     
@@ -252,10 +249,14 @@ export default function HostUploadPage() {
           body: JSON.stringify({ imageBase64: base64 }),
         });
 
+        if (!res.ok) {
+          throw new Error(`Upload failed: Server returned status ${res.status}. The receipt might be too long or the AI timed out.`);
+        }
+
         const data = await res.json();
 
-        if (!res.ok) {
-          throw new Error(data.error || "Upload failed");
+        if (data.error) {
+          throw new Error(data.error);
         }
 
         setReviewReceipt(data.enrichedReceipt as ReviewReceipt);

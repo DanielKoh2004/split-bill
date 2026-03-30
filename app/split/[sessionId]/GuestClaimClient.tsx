@@ -689,33 +689,33 @@ export default function GuestClaimClient({
 
       {/* Inline Tutorial Legend */}
       {showLegend && (
-        <div className="mx-5 mb-4 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl relative shadow-sm">
+        <div className="mx-5 mb-4 p-4 bg-elevated-themed border border-themed rounded-2xl relative shadow-card-themed">
           <button
             onClick={() => setShowLegend(false)}
-            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-indigo-500/60 hover:text-indigo-500 transition-colors bg-transparent rounded-full hover:bg-indigo-500/10"
+            className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-secondary-themed hover:text-primary-themed transition-colors bg-transparent rounded-full hover:bg-input-themed"
             aria-label="Dismiss tutorial"
           >
             <X className="w-4 h-4" />
           </button>
           
-          <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-            <Info className="w-3.5 h-3.5" />
+          <h3 className="text-xs font-bold text-primary-themed uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5 text-indigo-500" />
             How to Claim
           </h3>
           
-          <div className="space-y-3 text-sm text-indigo-900/80 dark:text-indigo-200/80 leading-snug">
+          <div className="space-y-3 text-sm text-secondary-themed leading-snug">
             <div className="flex items-start gap-3">
               <div className="shrink-0 w-6 h-6 rounded-full bg-[#10B981] flex items-center justify-center mt-0.5 shadow-sm">
                 <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />
               </div>
-              <p>Tap to claim an item just for yourself.</p>
+              <p className="flex-1">Tap to claim an item just for yourself.</p>
             </div>
             
             <div className="flex items-start gap-3">
               <div className="shrink-0 w-6 h-6 rounded-full bg-purple-500 flex items-center justify-center mt-0.5 shadow-sm">
                 <Users className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
               </div>
-              <p>Tap to split an item. Wait for others to tap it too!</p>
+              <p className="flex-1">Tap to split an item. Wait for others to tap it too!</p>
             </div>
           </div>
         </div>
