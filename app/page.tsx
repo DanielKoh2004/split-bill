@@ -17,6 +17,8 @@ import {
   Users,
   Image as ImageIcon,
   Share,
+  Minus,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 import { parseQRImage } from "@/src/duitnowQR";
@@ -92,6 +94,8 @@ export default function HostUploadPage() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [localTaxInput, setLocalTaxInput] = useState<string | null>(null);
+  const [localServiceInput, setLocalServiceInput] = useState<string | null>(null);
   const [isFinalizingReview, setIsFinalizingReview] = useState(false);
   
   // Privacy features
@@ -109,7 +113,9 @@ export default function HostUploadPage() {
 
   // ── Manual Entry State ──────────────────────────────────
   const [showManualEntry, setShowManualEntry] = useState(false);
-  const [manualItems, setManualItems] = useState([{ id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }]);
+  const [manualItems, setManualItems] = useState<Array<{ id: string; name: string; quantity: number | string; priceInput: string; }>>([
+    { id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }
+  ]);
 
   useEffect(() => {
     setMounted(true);
@@ -202,14 +208,19 @@ export default function HostUploadPage() {
   const handleManualSubmit = () => {
     const mappedItems = manualItems
       .filter(item => item.name.trim() !== "")
-      .map(item => ({
-        id: item.id || crypto.randomUUID(),
-        name: item.name.trim(),
-        quantity: parseInt(item.quantity.toString(), 10) || 1,
-        priceInCents: Math.round(parseFloat(item.priceInput || "0") * 100)
-      }));
+      .map(item => {
+        const unitPriceInCents = Math.round(parseFloat(item.priceInput || "0") * 100);
+        const qty = parseInt(item.quantity.toString(), 10) || 1;
+        return {
+          id: item.id || crypto.randomUUID(),
+          name: item.name.trim(),
+          quantity: qty,
+          priceInCents: unitPriceInCents * qty // Converts Unit Price to Row Total
+        };
+      });
     
-    const calculatedSubtotal = mappedItems.reduce((sum, item) => sum + (item.priceInCents * item.quantity), 0);
+    // Subtotal is now safely just the sum of the row totals
+    const calculatedSubtotal = mappedItems.reduce((acc, item) => acc + item.priceInCents, 0);
     
     const manualReceipt: ReviewReceipt = {
       merchantName: "Manual Entry",
@@ -468,6 +479,8 @@ export default function HostUploadPage() {
     setLiveStatus(null);
     setShowManualEntry(false);
     setManualItems([{ id: crypto.randomUUID(), name: "", quantity: 1, priceInput: "" }]);
+    setLocalTaxInput(null);
+    setLocalServiceInput(null);
   };
 
   // ── Clear All Sessions ─────────────────────────────────
@@ -909,26 +922,58 @@ export default function HostUploadPage() {
                       className="w-full px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none placeholder:text-muted-themed"
                     />
                     <div className="flex items-center gap-2">
-                      <div className="flex-1 flex items-center gap-2 min-w-0">
+                      <div className="flex-[1.2] flex items-center gap-2 min-w-0">
                         <span className="text-xs font-semibold text-secondary-themed uppercase w-7 shrink-0">Qty</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => {
-                            const newItems = [...manualItems];
-                            newItems[index].quantity = parseInt(e.target.value) || 1;
-                            setManualItems(newItems);
-                          }}
-                          className="w-full min-w-0 px-3 py-2 rounded-lg border border-themed bg-input-themed text-primary-themed text-sm font-semibold focus:border-[#10B981] focus:ring-1 focus:ring-[#10B981] outline-none"
-                        />
+                        <div className="flex w-full items-center bg-input-themed border border-themed rounded-lg overflow-hidden focus-within:border-[#10B981] focus-within:ring-1 focus-within:ring-[#10B981] transition-all h-[38px]">
+                          <button
+                            onClick={() => {
+                              const newItems = [...manualItems];
+                              const currentQty = parseInt(newItems[index].quantity.toString()) || 1;
+                              newItems[index].quantity = Math.max(1, currentQty - 1);
+                              setManualItems(newItems);
+                            }}
+                            className="w-8 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const newItems = [...manualItems];
+                              newItems[index].quantity = e.target.value === "" ? "" : (parseInt(e.target.value) || 1);
+                              setManualItems(newItems);
+                            }}
+                            onBlur={() => {
+                              const newItems = [...manualItems];
+                              if (newItems[index].quantity === "" || (parseInt(newItems[index].quantity.toString()) || 0) < 1) {
+                                newItems[index].quantity = 1;
+                                setManualItems(newItems);
+                              }
+                            }}
+                            className="w-full min-w-0 px-1 py-1 text-center bg-transparent text-primary-themed text-sm font-semibold outline-none appearance-none"
+                            style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
+                          />
+                          <button
+                            onClick={() => {
+                              const newItems = [...manualItems];
+                              const currentQty = parseInt(newItems[index].quantity.toString()) || 1;
+                              newItems[index].quantity = currentQty + 1;
+                              setManualItems(newItems);
+                            }}
+                            className="w-8 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                       <div className="flex-1 flex items-center gap-2 min-w-0">
                         <span className="text-xs font-semibold text-secondary-themed uppercase w-6 shrink-0 text-right">RM</span>
                         <input
                           type="number"
                           step="0.01"
-                          placeholder="0.00"
+                          placeholder="Unit Price"
                           value={item.priceInput}
                           onChange={(e) => {
                             const newItems = [...manualItems];
@@ -1166,26 +1211,76 @@ export default function HostUploadPage() {
                 <span className="text-secondary-themed">{t.sstTax}</span>
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-secondary-themed font-medium">RM</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={(reviewReceipt.taxInCents / 100).toFixed(2)}
-                    onChange={(e) => handleUpdateTotals("taxInCents", e.target.value)}
-                    className="w-20 px-2 py-1 rounded-md border border-themed bg-input-themed text-primary-themed font-medium font-mono text-right focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
-                  />
+                  <div className="flex items-center bg-input-themed border border-themed rounded-md overflow-hidden focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500 transition-all w-24 h-[30px]">
+                    <button
+                      onClick={() => {
+                        setLocalTaxInput(null);
+                        handleUpdateTotals("taxInCents", Math.max(0, (reviewReceipt.taxInCents - 1) / 100).toFixed(2));
+                      }}
+                      className="w-7 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={localTaxInput !== null ? localTaxInput : (reviewReceipt.taxInCents / 100).toFixed(2)}
+                      onChange={(e) => {
+                        setLocalTaxInput(e.target.value);
+                        handleUpdateTotals("taxInCents", e.target.value);
+                      }}
+                      onBlur={() => setLocalTaxInput(null)}
+                      className="flex-1 w-full min-w-0 px-0.5 py-1 text-center bg-transparent text-primary-themed font-medium font-mono text-sm outline-none appearance-none"
+                      style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
+                    />
+                    <button
+                      onClick={() => {
+                        setLocalTaxInput(null);
+                        handleUpdateTotals("taxInCents", ((reviewReceipt.taxInCents + 1) / 100).toFixed(2));
+                      }}
+                      className="w-7 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-secondary-themed">{t.serviceCharge}</span>
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-secondary-themed font-medium">RM</span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={(reviewReceipt.serviceChargeInCents / 100).toFixed(2)}
-                    onChange={(e) => handleUpdateTotals("serviceChargeInCents", e.target.value)}
-                    className="w-20 px-2 py-1 rounded-md border border-themed bg-input-themed text-primary-themed font-medium font-mono text-right focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none"
-                  />
+                  <div className="flex items-center bg-input-themed border border-themed rounded-md overflow-hidden focus-within:border-amber-500 focus-within:ring-1 focus-within:ring-amber-500 transition-all w-24 h-[30px]">
+                    <button
+                      onClick={() => {
+                        setLocalServiceInput(null);
+                        handleUpdateTotals("serviceChargeInCents", Math.max(0, (reviewReceipt.serviceChargeInCents - 1) / 100).toFixed(2));
+                      }}
+                      className="w-7 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={localServiceInput !== null ? localServiceInput : (reviewReceipt.serviceChargeInCents / 100).toFixed(2)}
+                      onChange={(e) => {
+                        setLocalServiceInput(e.target.value);
+                        handleUpdateTotals("serviceChargeInCents", e.target.value);
+                      }}
+                      onBlur={() => setLocalServiceInput(null)}
+                      className="flex-1 w-full min-w-0 px-0.5 py-1 text-center bg-transparent text-primary-themed font-medium font-mono text-sm outline-none appearance-none"
+                      style={{ WebkitAppearance: 'none', MozAppearance: 'textfield' }}
+                    />
+                    <button
+                      onClick={() => {
+                        setLocalServiceInput(null);
+                        handleUpdateTotals("serviceChargeInCents", ((reviewReceipt.serviceChargeInCents + 1) / 100).toFixed(2));
+                      }}
+                      className="w-7 h-full flex justify-center items-center text-secondary-themed hover:bg-elevated-themed hover:text-primary-themed transition-colors shrink-0"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="border-t border-themed pt-2 mt-2 flex justify-between">
