@@ -105,6 +105,7 @@ export default function HostUploadPage() {
   // ── Live Dashboard State ────────────────────────────────
   const [liveStatus, setLiveStatus] = useState<any>(null);
   const [isWiping, setIsWiping] = useState(false);
+  const [settledGuests, setSettledGuests] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setMounted(true);
@@ -661,13 +662,24 @@ export default function HostUploadPage() {
                 <div className="mb-4">
                   <p className="text-xs text-secondary-themed uppercase tracking-wider font-semibold mb-2">{t.guestList}</p>
                   <div className="space-y-2">
-                    {Array.from(guestTotals.values()).map((g, i) => (
-                      <div key={i} className="flex justify-between items-center bg-elevated-themed p-2.5 rounded-lg border border-themed">
+                    {Array.from(guestTotals.entries()).map(([gId, g], i) => (
+                      <div key={i} className={`flex justify-between items-center bg-elevated-themed p-2.5 rounded-lg border border-themed transition-opacity ${settledGuests.has(gId) ? 'opacity-50' : ''}`}>
                         <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            className="w-4 h-4 rounded text-emerald-500 bg-card-themed border-themed focus:ring-emerald-500"
+                            checked={settledGuests.has(gId)}
+                            onChange={(e) => {
+                              const next = new Set(settledGuests);
+                              if (e.target.checked) next.add(gId);
+                              else next.delete(gId);
+                              setSettledGuests(next);
+                            }}
+                          />
                           <Users className="w-4 h-4 text-emerald-500" />
-                          <span className="text-sm font-medium text-primary-themed">{g.name}</span>
+                          <span className={`text-sm font-medium text-primary-themed ${settledGuests.has(gId) ? 'line-through' : ''}`}>{g.name}</span>
                         </div>
-                        <span className="text-sm font-bold text-primary-themed">{formatRM(g.sum)}</span>
+                        <span className={`text-sm font-bold text-primary-themed ${settledGuests.has(gId) ? 'line-through' : ''}`}>{formatRM(g.sum)}</span>
                       </div>
                     ))}
                   </div>
@@ -703,8 +715,12 @@ export default function HostUploadPage() {
 
               <button
                 onClick={handleWipeSession}
-                disabled={isWiping}
-                className="w-full py-3 rounded-xl bg-red-500/10 text-red-500 font-bold text-sm border border-red-500/20 hover:bg-red-500 hover:text-white transition-all duration-200 flex items-center justify-center gap-2 mt-2"
+                disabled={isWiping || (guestTotals.size > 0 && settledGuests.size < guestTotals.size)}
+                className={`w-full py-3 rounded-xl font-bold text-sm transition-all duration-200 flex items-center justify-center gap-2 mt-2 ${
+                  isWiping || (guestTotals.size > 0 && settledGuests.size < guestTotals.size)
+                    ? 'bg-elevated-themed text-muted-themed border border-themed cursor-not-allowed'
+                    : 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white'
+                }`}
               >
                 {isWiping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Server className="w-4 h-4" />}
                 {isWiping ? t.wiping : t.wipeSession}
