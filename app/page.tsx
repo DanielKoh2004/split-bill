@@ -383,24 +383,26 @@ export default function HostUploadPage() {
     }
   };
 
-  const handleNativeShare = async () => {
-    if (!shareUrl || !reviewReceipt) return;
-    const text = t.inviteText.replace("[MERCHANT]", reviewReceipt.merchantName);
-    
+  const handleDashboardShare = async () => {
+    if (!lastSession?.sessionId) return;
+    const url = `${window.location.origin}/split/${lastSession.sessionId}`;
+    const merchant = liveStatus?.receipt?.merchantName || "The bill";
+    // Hardcoded fallback to prevent i18n crashes
+    const text = `${merchant} is ready to split! Tap here to claim your share:`;
+
     try {
       if (navigator.share) {
         await navigator.share({
           title: "Split Bill",
           text: text,
-          url: shareUrl,
+          url: url,
         });
       } else {
-        await navigator.clipboard.writeText(`${text}${shareUrl}`);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        alert("Invite message copied to clipboard!");
       }
-    } catch {
-      // ignore user cancellation or failure
+    } catch (e) {
+      // user cancelled share sheet, ignore
     }
   };
 
@@ -712,6 +714,14 @@ export default function HostUploadPage() {
                   {t.fullyClaimedBadge}
                 </div>
               )}
+
+              <button
+                onClick={handleDashboardShare}
+                className="w-full py-3 rounded-xl bg-[#10B981] text-white font-bold text-sm shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all duration-200 flex items-center justify-center gap-2 mt-4 mb-2"
+              >
+                <Share className="w-4 h-4" />
+                {t.inviteFriends || "Invite Friends"}
+              </button>
 
               <button
                 onClick={handleWipeSession}
@@ -1129,18 +1139,6 @@ export default function HostUploadPage() {
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-3 mb-6">
-            <button
-              onClick={handleNativeShare}
-              className="
-                w-full py-4 rounded-2xl bg-[#10B981] text-white font-bold text-lg
-                flex items-center justify-center gap-2 transition-all duration-200
-                hover:opacity-90 active:scale-[0.98] shadow-lg shadow-emerald-500/20
-              "
-            >
-              <Share className="w-5 h-5" />
-              {t.inviteFriends}
-            </button>
-
             <button
               onClick={handleCopy}
               className="
