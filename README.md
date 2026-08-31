@@ -1,156 +1,178 @@
 <div align="center">
 
-# SPLIT / BILL
+# 🍽️ SPLIT-BILL
 
-### `SCAN • CLAIM • SETTLE`
+### *One table. One receipt. Everyone pays their share.*
 
-**The group bill, without the group spreadsheet.**
+**A Malaysian group-settlement app that turns a receipt into a live shared bill — then turns the final balance back into DuitNow.**
 
-<br>
-
-![Next.js](https://img.shields.io/badge/NEXT.JS-15-111111?style=flat-square&logo=nextdotjs&logoColor=white)
-![React](https://img.shields.io/badge/REACT-19-149ECA?style=flat-square&logo=react&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TYPESCRIPT-5-3178C6?style=flat-square&logo=typescript&logoColor=white)
-![DuitNow](https://img.shields.io/badge/DUITNOW-QR-E21C2A?style=flat-square)
-
-<br><br>
-
-> **Snap the receipt. Let everyone claim what they ate. Pay the exact amount.**
->
-> Built around Malaysia's DuitNow QR ecosystem, Split-Bill turns a messy restaurant tab into a live, shared settlement session.
+`RECEIPT → PEOPLE → CLAIMS → BALANCES → PAYMENT`
 
 </div>
 
 ---
 
-## THE PRODUCT
+# 🧾 Tonight's Table
+
+Imagine this:
+
+You are six people deep into dinner.
+
+The waiter drops one giant receipt.
+
+Then someone says:
+
+> “Okay… who had what?”
+
+Five minutes later, everyone's opening calculator apps.
+
+**Split-Bill removes that moment.**
 
 ```text
-                 ONE RECEIPT
-                      │
-                      ▼
-                ┌───────────┐
-                │ AI PARSER │
-                └─────┬─────┘
-                      ▼
-              ┌───────────────┐
-              │ SHARED LEDGER │
-              └───────┬───────┘
-                      │
-          ┌───────────┼───────────┐
-          ▼           ▼           ▼
-       DANIEL        ALEX        SAM
-       ──────        ────        ───
-       RM12          RM8         RM17
-          \           |          /
-           └──────────┼─────────┘
-                      ▼
-                 EXACT TOTAL
-                      │
-                      ▼
-                  DUITNOW QR
+             THE OLD WAY
+
+    Receipt
+       ↓
+   "Who ate this?"
+       ↓
+   Mental math
+       ↓
+   Calculator
+       ↓
+   "Wait, did you include SST?"
+       ↓
+   Someone owes RM0.37
+       ↓
+   😭
+
+
+             THE SPLIT-BILL WAY
+
+    📸 Receipt
+       ↓
+    AI parsing
+       ↓
+    👥 Claim items
+       ↓
+    🧮 Exact reconciliation
+       ↓
+    🇲🇾 DuitNow QR
+       ↓
+    ✅ Done
 ```
 
-The core idea is deliberately simple: **the receipt is the source of truth; the app only determines who owes which part of it.**
+---
+
+# ✦ SEE IT BEFORE YOU READ IT
+
+The existing product screenshots are intentionally kept here — **these are the real UI designs from the repository, not mock placeholders.**
+
+### ☀️ Light / 🌙 Dark
+
+<table>
+<tr>
+<td align="center"><b>LIGHT · ENGLISH</b><br><br><img src="./public/docs/default_light_english_1774798917799.png" width="430"></td>
+<td align="center"><b>DARK · ENGLISH</b><br><br><img src="./public/docs/dark_mode_english_1774798931920.png" width="430"></td>
+</tr>
+<tr>
+<td align="center"><b>LIGHT · 中文</b><br><br><img src="./public/docs/light_mode_chinese_1774798959449.png" width="430"></td>
+<td align="center"><b>DARK · 中文</b><br><br><img src="./public/docs/dark_mode_chinese_1774798949185.png" width="430"></td>
+</tr>
+</table>
+
+<br>
+
+*The interface supports instant Light/Dark and English/Simplified Chinese switching without a full-page reload.*
 
 ---
 
-## THE INTERFACE, PRESERVED
+# 🍜 THE RECEIPT IS THE DATABASE
 
-The repository already contains the original Split-Bill UI visuals. They remain part of this README redesign rather than being replaced with new placeholder artwork.
-
-### Light × Dark
-
-| ☀️ Light Mode — English | 🌙 Dark Mode — English |
-|:---:|:---:|
-| ![Light English](./public/docs/default_light_english_1774798917799.png) | ![Dark English](./public/docs/dark_mode_english_1774798931920.png) |
-
-### English × 中文
-
-| 🇬🇧 Light Mode — English | 🇨🇳 Light Mode — Chinese |
-|:---:|:---:|
-| ![Light English](./public/docs/default_light_english_1774798917799.png) | ![Light Chinese](./public/docs/light_mode_chinese_1774798959449.png) |
-
-| 🇬🇧 Dark Mode — English | 🇨🇳 Dark Mode — Chinese |
-|:---:|:---:|
-| ![Dark English](./public/docs/dark_mode_english_1774798931920.png) | ![Dark Chinese](./public/docs/dark_mode_chinese_1774798949185.png) |
-
-> The four original screenshots are preserved from the existing repository documentation.
-
----
-
-# 01 / RECEIPT → BILL
-
-The first step is turning an image of a physical receipt into a structured bill.
+Split-Bill starts with the physical source document.
 
 ```text
-PHOTO
-  ↓
-OCR / PARSING
-  ↓
-LINE ITEMS
-  ↓
-SUBTOTAL
-  ↓
-TAX / SERVICE CHARGE
-  ↓
-FINAL TOTAL
+┌───────────────────────────────┐
+│         RESTAURANT            │
+│                               │
+│ Chicken Rice       RM 12.00   │
+│ Nasi Lemak         RM 10.00   │
+│ Pizza             RM 24.00   │
+│ Milo              RM  4.50   │
+│                               │
+│ SST                RM  2.83   │
+│ Service Charge     RM  4.05   │
+│ ───────────────────────────── │
+│ TOTAL              RM 57.38   │
+└───────────────────────────────┘
+                │
+                ▼
+         structured receipt
 ```
 
-The repository contains a dedicated `receiptParser.ts` implementation and accompanying tests.
+The receipt parser turns the image into structured line items that the rest of the system can reason about.
+
+That means the user does not have to rebuild the bill manually.
 
 ---
 
-# 02 / CLAIM → OWNERSHIP
+# 👥 WHO ATE WHAT?
 
-Everyone sees the same bill, but each person claims only what they actually consumed.
+The interaction model is deliberately closer to **shopping cart ownership** than a traditional “split equally” calculator.
+
+### Exclusive
 
 ```text
-ITEM
+Chicken Rice
+     │
+     └────────► Daniel
+                 RM 12.00
+```
+
+### Shared
+
+```text
+Pizza
  │
- ├── EXCLUSIVE ─────────► ONE PERSON
- │
- └── SHARED ────────────► MULTIPLE PEOPLE
-                              │
-                              ▼
-                         FRACTIONAL SPLIT
+ ├────► Daniel   1/2
+ └────► Aidan    1/2
 ```
 
-The system treats exclusive and shared claims as mutually exclusive states for an item, preventing the same food from being both wholly claimed and fractionally shared.
+The claim engine supports both modes while preventing an item from becoming simultaneously exclusive and fractional.
 
 ---
 
-# 03 / THE “QUANTUM CLAIM” PROBLEM
+# ⚠️ THE LAST SLICE PROBLEM
 
-Five users tapping the same item simultaneously should not produce five winners.
-
-A naïve flow:
+What happens when everyone taps **Claim** at almost the same time?
 
 ```text
-A ─┐
-B ─┤
-C ─┼─► READ ─► MODIFY ─► WRITE
-D ─┤
-E ─┘
+Daniel ──┐
+Aidan  ──┤
+Sean   ──┼──► CLAIM PIZZA
+YT     ──┤
+Guest  ──┘
 ```
 
-Split-Bill pushes the critical claim operation into atomic KV/Lua execution:
+A normal read → modify → write flow can race.
+
+Split-Bill moves the critical operation into **atomic Lua execution in the KV layer**.
 
 ```text
-A ─┐
-B ─┤
-C ─┼─► ATOMIC LUA ─► ONE VALID STATE
-D ─┤
-E ─┘
+Daniel ──┐
+Aidan  ──┤
+Sean   ──┼──► ATOMIC CLAIM
+YT     ──┤        │
+Guest  ──┘        ▼
+              CONSISTENT STATE
 ```
 
-This is the key reason the claim engine is designed around atomic operations rather than ordinary application-level read/write sequences.
+The implementation includes dedicated claim scripts for exclusive and shared-item operations, including cross-mode protection.
 
 ---
 
-# 04 / SEN-LEVEL ACCOUNTING
+# 🧮 MONEY HAS NO DECIMALS
 
-Financial arithmetic is handled as integer **sen / cents**, not floating-point currency.
+Not internally, anyway.
 
 ```text
 RM 10.00
@@ -158,255 +180,221 @@ RM 10.00
 1000 sen
 ```
 
-For three people sharing RM10.00:
+Why?
+
+Because this:
+
+```text
+10.00 / 3
+```
+
+is not a clean monetary representation.
+
+But this is:
 
 ```text
 1000 / 3
-   ↓
-333 + 333 + 333
-   ↓
-1 sen remainder
-   ↓
-Systematic allocation
 ```
-
-The invariant is:
 
 ```text
-SUM(participant balances)
-            =
-receipt total
+333 + 333 + 334 = 1000
 ```
 
-That matters much more than making the displayed number look correct.
+The reconciliation engine works in integer sen/cents and systematically distributes the remainder so that the final participant balances still equal the receipt total.
+
+> **The bill should reconcile to the last sen.**
 
 ---
 
-# 05 / TAX FOLLOWS THE FOOD
+# 🍕 SHARED FOOD ≠ SHARED TAX CHAOS
 
-SST and service charges should not become detached from the items that generated them.
+Taxes and service charges also need to follow the bill.
 
 ```text
-ITEM A ──────┐
-ITEM B ──────┼──► BILL TOTAL
-ITEM C ──────┘
-                  │
-                  ├── SST
-                  └── SERVICE CHARGE
-                           │
-                           ▼
-                   ALLOCATED TO USERS
+                    RECEIPT
+                       │
+            ┌──────────┴──────────┐
+            ▼                     ▼
+       LINE ITEMS            CHARGES
+            │                SST / SERVICE
+            └──────────┬──────────┘
+                       ▼
+                 FINAL BALANCES
 ```
 
-Changing a parsed item's cost therefore changes its downstream allocation rather than leaving stale tax values behind.
+Changing a parsed item can therefore propagate through its downstream charge allocation rather than leaving stale amounts behind.
 
 ---
 
-# 06 / EPHEMERAL BY DEFAULT
+# 🇲🇾 PAYMENT, WITHOUT ANOTHER WALLET
 
-This is a dinner session, not a permanent database record of your social life.
+The final step uses **DuitNow QR** rather than inventing another payment ecosystem.
 
 ```text
-CREATE
-  ↓
-COLLECT
-  ↓
-CLAIM
-  ↓
-SETTLE
-  ↓
-EXPIRE
+          HOST'S QR
+             │
+             ▼
+        EMVCo parsing
+             │
+             ▼
+       merchant details
+             │
+             ▼
+        inject amount
+             │
+             ▼
+        rebuilt QR
+             │
+             ▼
+       existing bank app
 ```
 
-The current design uses Vercel KV TTLs to expire session data after approximately **2 hours**.
+The repository has a dedicated `duitnowQR.ts` module and tests around QR handling.
 
-That includes temporary session state such as names, claims and uploaded receipt images.
+The payment flow is therefore:
 
-> **The bill has a lifecycle. The data should too.**
+**claim first → calculate exactly → pay through the rail everyone already has.**
 
 ---
 
-# 07 / DUITNOW AS THE LAST MILE
+# ⏳ THE BILL EXPIRES
 
-Rather than creating another payment ecosystem, Split-Bill uses the payment rail Malaysians already recognise.
+A restaurant bill is an event, not a permanent social record.
 
 ```text
-HOST DUITNOW QR
-      │
-      ▼
-EMVCo PARSER
-      │
-      ▼
-PRESERVE MERCHANT DATA
-      │
-      ▼
-INJECT EXACT AMOUNT
-      │
-      ▼
-   FINAL QR
-      │
-      ▼
-EXISTING BANK / WALLET APP
+      CREATE
+        ↓
+      SHARE
+        ↓
+      CLAIM
+        ↓
+      SETTLE
+        ↓
+       ⌛
+      EXPIRE
 ```
 
-The codebase includes a dedicated `duitnowQR.ts` module plus test coverage for QR behaviour.
+The current design uses short-lived KV storage with a **2-hour TTL** for temporary session state.
+
+The project also applies privacy controls around uploaded receipt images, including metadata handling and a 500 KB upload limit.
+
+> **Dinner ends. The session should end with it.**
 
 ---
 
-# 08 / LIVE HOST VIEW
+# 🗺️ FROM ONE DINNER TO A WHOLE TRIP
 
-The host flow is treated as a settlement console.
+Trip Mode treats multiple dinners as one eventual settlement.
 
 ```text
-┌───────────────────────────────────────────┐
-│ DINNER — 6 PEOPLE                         │
-├───────────────────────────────────────────┤
-│                                           │
-│ SETTLEMENT                                │
-│ ███████████████████░░░  84%              │
-│                                           │
-│ CLAIMED                     RM 86.40      │
-│ REMAINING                   RM 16.20      │
-│                                           │
-│ ✓ Daniel                                  │
-│ ✓ Aidan                                   │
-│ ✓ Sean                                    │
-│ ◐ Guest 04                                │
-│ ○ Guest 05                                │
-│                                           │
-│              [ SHOW QR ]                  │
-└───────────────────────────────────────────┘
+FRI NIGHT      RM 42.80
+SAT BRUNCH     RM 18.50
+SAT DINNER     RM 67.30
+COFFEE         RM 11.20
+               ────────
+TOTAL         RM139.80
 ```
 
-The repository includes a live host page that tracks claim and settlement progress.
+Distinct sessions can be combined into a payment hub so the user does not need to manually reconcile four separate micro-debts.
 
 ---
 
-# 09 / TRIP MODE
+# 🎨 TWO LANGUAGES. TWO THEMES. ONE BILL.
 
-A weekend does not have one receipt.
+The interface was built with a custom theme/context system and a dedicated i18n layer.
 
 ```text
-Friday Dinner     RM 42.80
-Saturday Brunch   RM 18.50
-Saturday Dinner   RM 67.30
-Sunday Cafe       RM 11.20
-                    ──────
-Trip Total        RM139.80
+                 SPLIT-BILL
+                     │
+             ┌───────┴───────┐
+             ▼               ▼
+          VISUAL            LANGUAGE
+             │               │
+        ┌────┴────┐       ┌──┴───┐
+        ▼         ▼       ▼      ▼
+      LIGHT     DARK     EN     中文
 ```
 
-Trip Mode allows multiple settlement sessions to be combined into a single payment flow and reconstructs a final DuitNow QR for the consolidated amount.
+The four existing screenshots above demonstrate all four combinations.
 
 ---
 
-# 10 / PRIVACY GUARDRAILS
-
-Temporary receipt media is handled with explicit limits.
+# 🧠 ARCHITECTURE, IN ONE MEAL
 
 ```text
-UPLOAD
-  │
-  ├── size limit
-  ├── metadata stripping
-  └── temporary storage
-```
-
-The project design also validates DuitNow input using EMVCo structure checks rather than trusting arbitrary QR strings.
-
----
-
-# 11 / DESIGN SYSTEM
-
-The UI was built with a custom theme system supporting:
-
-```text
-LIGHT MODE  ◐  DARK MODE
-
-ENGLISH     ◐  简体中文
-```
-
-Theme switching and language switching are implemented as application-level systems rather than separate static pages.
-
----
-
-# 12 / ARCHITECTURE
-
-```text
-                   ┌───────────────────┐
-                   │     NEXT.JS       │
-                   │   React + TS      │
-                   └─────────┬─────────┘
-                             │
-          ┌──────────────────┼──────────────────┐
-          ▼                  ▼                  ▼
-   Receipt Parser       Claim Engine       Payment Engine
-          │                  │                  │
-          │            ┌─────┴─────┐            │
-          │            ▼           ▼            │
-          │         EXCLUSIVE    SHARED         │
-          │            │           │            │
-          └────────────┴─────┬─────┴────────────┘
-                              ▼
-                         VERCEL KV
-                              │
-                         EPHEMERAL
-                           STATE
+                         USER
+                          │
+                          ▼
+                  ┌──────────────┐
+                  │  NEXT.JS UI  │
+                  └──────┬───────┘
+                         │
+        ┌────────────────┼────────────────┐
+        ▼                ▼                ▼
+     RECEIPT           CLAIMS           PAYMENT
+      PARSER           ENGINE             QR
+        │                │                │
+        ▼         ┌──────┴──────┐         ▼
+    STRUCTURED    │   ATOMIC    │      EMVCo
+       BILL       │ LUA / KV    │      REBUILD
+        │         └──────┬──────┘         │
+        └────────────────┼────────────────┘
+                         ▼
+                  MATH / RECONCILE
+                         │
+                         ▼
+                    FINAL BALANCE
+                         │
+                         ▼
+                     DUITNOW
 ```
 
 ---
 
-# 13 / STACK
+# 🧰 TECHNOLOGY
 
-| Layer | Technology |
+| Layer | Choice |
 |---|---|
-| Framework | **Next.js 15** |
-| Frontend | **React 19** |
+| Web framework | **Next.js 15** |
+| UI | **React 19** |
 | Language | **TypeScript 5** |
 | Styling | **Tailwind CSS 4** |
-| Storage | **Vercel KV** |
+| Ephemeral state | **Vercel KV** |
 | QR decoding | **jsQR** |
 | QR generation | **qrcode.react** |
 | Validation | **Zod** |
 | Icons | **Lucide React** |
 | Testing | **Vitest** |
 
-These dependencies are reflected in the repository's package manifest.
+The dependency manifest in the repository confirms this application stack.
 
 ---
 
-# 14 / SOURCE MAP
+# 📦 PROJECT MAP
 
 ```text
 split-bill/
 │
-├── app/
-│   └── application routes / UI flows
+├── app/                 → routes + application UI
 │
 ├── src/
-│   ├── receiptParser.ts
-│   ├── duitnowQR.ts
-│   ├── mathEngine.ts
-│   ├── privacy.ts
-│   ├── rateLimit.ts
-│   ├── ThemeContext.tsx
-│   ├── i18n.ts
-│   └── *.test.ts
+│   ├── receiptParser.ts → receipt → structured items
+│   ├── mathEngine.ts    → exact monetary reconciliation
+│   ├── duitnowQR.ts     → EMVCo QR parsing / rebuilding
+│   ├── privacy.ts       → privacy helpers
+│   ├── rateLimit.ts     → request protection
+│   ├── ThemeContext.tsx → theme state
+│   ├── i18n.ts          → localization
+│   └── *.test.ts        → automated tests
 │
-├── public/
-│   └── docs/
-│       ├── default_light_english_1774798917799.png
-│       ├── dark_mode_english_1774798931920.png
-│       ├── light_mode_chinese_1774798959449.png
-│       └── dark_mode_chinese_1774798949185.png
-│
-├── constraints.md
-├── package.json
-└── README.md
+├── public/docs/         → product screenshots
+├── constraints.md       → implementation constraints
+└── package.json
 ```
 
 ---
 
-# 15 / RUN
+# 🚀 RUN LOCALLY
 
 ```bash
 git clone https://github.com/DanielKoh2004/split-bill.git
@@ -415,88 +403,93 @@ npm install
 npm run dev
 ```
 
-Open:
+Then open:
 
 ```text
 http://localhost:3000
 ```
 
-Tests:
+Run tests:
 
 ```bash
 npm test
 ```
 
-Production build:
+Production:
 
 ```bash
 npm run build
 npm start
 ```
 
-Configure the required `.env.local` values for the Vercel KV and receipt/AI integrations before running the full application.
+Configure the required `.env.local` values for the project's KV and receipt-processing integrations.
 
 ---
 
-# 16 / WHY THIS PROJECT IS INTERESTING
+# 🧪 THE INTERESTING ENGINEERING PARTS
 
-This is not fundamentally a calculator.
+This project looks simple from the outside.
 
-It is a small distributed-systems problem hiding behind a restaurant receipt.
+Underneath, it combines several surprisingly serious problems:
 
-```text
-          USER EXPERIENCE
-                 │
-                 ▼
-        "Who owes how much?"
-                 │
-        ┌────────┼────────┐
-        ▼        ▼        ▼
-      PARSE    CONCUR    RECONCILE
-        │        │        │
-        ▼        ▼        ▼
-      OCR      ATOMIC   INTEGER
-               CLAIMS     MATH
-        │        │        │
-        └────────┼────────┘
-                 ▼
-             SETTLEMENT
-```
+| Problem | Engineering response |
+|---|---|
+| Messy receipt image | Structured receipt parser |
+| Multiple people claiming simultaneously | Atomic Lua operations |
+| Shared-item ownership | Explicit fractional claims |
+| Floating-point currency | Integer sen arithmetic |
+| Tax / service allocation | Proportional reconciliation |
+| Payment interoperability | EMVCo / DuitNow reconstruction |
+| Temporary personal data | TTL-based ephemeral state |
+| QR manipulation | Strict parsing + validation |
 
-The difficult parts are not the buttons.
-
-They are **concurrency, financial correctness, payment interoperability, and privacy**.
+That's what makes the project more than a “split calculator”.
 
 ---
 
-# 17 / THE PRODUCT IN ONE FRAME
+# 🥢 THE DESIGN PHILOSOPHY
+
+### **Less typing.**
+
+Start from the receipt.
+
+### **Less arguing.**
+
+Everyone claims their own items.
+
+### **Less rounding.**
+
+Calculate in sen.
+
+### **Less infrastructure.**
+
+Use existing payment rails.
+
+### **Less data retention.**
+
+Let the session expire.
+
+---
+
+# 🍽️ ONE LAST RECEIPT
 
 ```text
-┌───────────────────────────────────────────────────────────┐
-│                                                           │
-│  📸  RECEIPT                                              │
-│       ↓                                                   │
-│  🧾  STRUCTURE                                            │
-│       ↓                                                   │
-│  👥  CLAIM                                                │
-│       ↓                                                   │
-│  🧮  RECONCILE                                            │
-│       ↓                                                   │
-│  🇲🇾  DUITNOW                                              │
-│       ↓                                                   │
-│  ✅  DONE                                                  │
-│                                                           │
-│            SPLIT THE BILL. NOT THE FRIENDSHIP.            │
-│                                                           │
-└───────────────────────────────────────────────────────────┘
+╭──────────────────────────────────────╮
+│              SPLIT-BILL              │
+│                                      │
+│    Scan it.                          │
+│    Claim it.                         │
+│    Split it.                         │
+│    Settle it.                        │
+│                                      │
+│    And get back to dinner.           │
+╰──────────────────────────────────────╯
 ```
 
 <div align="center">
 
-<br>
+### **Split the bill. Keep the dinner.**
 
-**Split-Bill** · Group settlement for the real world
-
-[View Repository →](https://github.com/DanielKoh2004/split-bill)
+[GitHub Repository →](https://github.com/DanielKoh2004/split-bill)
 
 </div>
